@@ -8,6 +8,16 @@ import {
 import { cn } from "@/lib/utils";
 import { papersService } from "@/lib/papersService";
 import { sectionsService, questionsService } from "@/lib/sectionsService";
+import {
+  exportPaperAsDoc,
+  exportPaperAsHtml,
+  exportPaperAsLatex,
+  exportPaperAsPdf,
+  exportPaperAsTxt,
+  openPaperPreviewWindow,
+  type ExportMeta,
+  type ExportSection,
+} from "@/lib/paperExport";
 
 export const Route = createFileRoute("/create")({
   head: () => ({
@@ -352,7 +362,14 @@ function PaperCreation() {
         {step === 2 && <StepMeta value={meta} onChange={setMeta} />}
         {step === 3 && <StepBlueprint sections={sections} setSections={setSections} />}
         {step === 4 && <StepLivePaper meta={meta} sections={sections} setSections={setSections} />}
-        {step === 5 && <StepExport meta={meta} totalQuestions={totalQuestions} totalMarks={totalMarksCalc} />}
+        {step === 5 && (
+          <StepExport
+            meta={meta}
+            sections={sections}
+            totalQuestions={totalQuestions}
+            totalMarks={totalMarksCalc}
+          />
+        )}
       </div>
 
       {/* Footer nav */}
@@ -1068,12 +1085,84 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
    Step 5 — Export
    ============================================================ */
 
-function StepExport({ meta, totalQuestions, totalMarks }: { meta: any; totalQuestions: number; totalMarks: number }) {
+function StepExport({
+  meta,
+  sections,
+  totalQuestions,
+  totalMarks,
+}: {
+  meta: any;
+  sections: Section[];
+  totalQuestions: number;
+  totalMarks: number;
+}) {
+  const [includeAnswers, setIncludeAnswers] = useState(false);
+  const [exportError, setExportError] = useState("");
+
+  const exportMeta: ExportMeta = {
+    title: meta.title,
+    subject: meta.subject,
+    durationMinutes: Number(meta.duration) || 180,
+    totalMarks,
+    institution: meta.institution,
+    code: meta.code,
+    semester: meta.semester,
+    examType: meta.examType,
+  };
+
+  const exportSections: ExportSection[] = sections.map((section) => ({
+    title: section.title,
+    instructions: section.instructions,
+    questions: section.questions.map((question) => ({
+      text: question.text,
+      marks: question.marks,
+      type: question.type,
+      topic: question.topic,
+      options: question.options,
+      answer: question.answer,
+    })),
+  }));
+
+  const hasQuestions = totalQuestions > 0;
+
+  const runExport = (fn: () => void) => {
+    setExportError("");
+    if (!hasQuestions) {
+      setExportError("Generate at least one question before exporting.");
+      return;
+    }
+    try {
+      fn();
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Export failed.");
+    }
+  };
+
   const formats = [
-    { name: "PDF", desc: "Print-ready, formatted layout", color: "rose" },
-    { name: "DOCX", desc: "Editable Word document", color: "primary" },
-    { name: "LaTeX", desc: "Source for academic typesetting", color: "violet" },
-    { name: "HTML", desc: "Web-ready preview link", color: "teal" },
+    {
+      name: "PDF",
+      desc: "Download PDF file",
+      color: "rose",
+      onClick: () => runExport(() => exportPaperAsPdf(exportMeta, exportSections, includeAnswers)),
+    },
+    {
+      name: "DOCX",
+      desc: "Download editable Word-compatible file",
+      color: "primary",
+      onClick: () => runExport(() => exportPaperAsDoc(exportMeta, exportSections, includeAnswers)),
+    },
+    {
+      name: "LaTeX",
+      desc: "Download .tex source",
+      color: "violet",
+      onClick: () => runExport(() => exportPaperAsLatex(exportMeta, exportSections, includeAnswers)),
+    },
+    {
+      name: "HTML",
+      desc: "Open browser preview of this paper",
+      color: "teal",
+      onClick: () => runExport(() => openPaperPreviewWindow(exportMeta, exportSections, includeAnswers)),
+    },
   ];
   return (
     <div className="p-6 md:p-8 space-y-6">
@@ -1093,7 +1182,12 @@ function StepExport({ meta, totalQuestions, totalMarks }: { meta: any; totalQues
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {formats.map((f) => (
-          <button key={f.name} className="group text-left rounded-xl bg-surface hover:bg-accent border border-border hover:border-primary/40 p-5 transition flex items-center gap-4">
+          <button
+            key={f.name}
+            onClick={f.onClick}
+            className="group text-left rounded-xl bg-surface hover:bg-accent border border-border hover:border-primary/40 p-5 transition flex items-center gap-4 disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled={!hasQuestions}
+          >
             <div className={cn(
               "h-12 w-12 rounded-lg flex items-center justify-center text-base font-bold",
               f.color === "rose" && "bg-rose/15 text-rose",
@@ -1110,6 +1204,35 @@ function StepExport({ meta, totalQuestions, totalMarks }: { meta: any; totalQues
             <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary transition" />
           </button>
         ))}
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            checked={includeAnswers}
+            onChange={(e) => setIncludeAnswers(e.target.checked)}
+            className="h-4 w-4 rounded border-border bg-surface"
+          />
+          Include answer key in exported files
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => runExport(() => exportPaperAsTxt(exportMeta, exportSections, includeAnswers))}
+            disabled={!hasQuestions}
+            className="px-4 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            Download TXT
+          </button>
+          <button
+            onClick={() => runExport(() => exportPaperAsHtml(exportMeta, exportSections, includeAnswers))}
+            disabled={!hasQuestions}
+            className="px-4 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            Download HTML
+          </button>
+        </div>
+        {exportError && <p className="text-xs text-rose">{exportError}</p>}
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5 flex items-center justify-between flex-wrap gap-3">

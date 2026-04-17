@@ -5,6 +5,22 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { papersService, type Paper } from "@/lib/papersService";
+import { sectionsService, type Section as ApiSection } from "@/lib/sectionsService";
+import {
+  buildPaperText,
+  exportPaperAsDoc,
+  exportPaperAsPdf,
+  openPaperPreviewWindow,
+  type ExportMeta,
+  type ExportSection,
+} from "@/lib/paperExport";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -50,6 +66,11 @@ function Dashboard() {
   const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewPaper, setPreviewPaper] = useState<Paper | null>(null);
+  const [previewSections, setPreviewSections] = useState<ExportSection[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [busyActionPaperId, setBusyActionPaperId] = useState<string | null>(null);
 
   const user = typeof window !== "undefined"
     ? JSON.parse(localStorage.getItem("user") ?? "null")
@@ -73,6 +94,76 @@ function Dashboard() {
   };
 
   useEffect(() => { load(); }, []);
+
+  const toExportMeta = (paper: Paper): ExportMeta => ({
+    title: paper.title,
+    subject: paper.subject,
+    durationMinutes: paper.duration_minutes,
+    totalMarks: paper.total_marks,
+  });
+
+  const toExportSections = (apiSections: ApiSection[]): ExportSection[] =>
+    apiSections.map((section) => ({
+      title: section.title,
+      instructions: section.instructions,
+      questions: (section.questions || []).map((question) => ({
+        text: question.text,
+        marks: question.marks,
+        type: question.q_type,
+        topic: question.topic,
+        options: (() => {
+          if (!question.options) return null;
+          try {
+            return JSON.parse(question.options);
+          } catch {
+            return null;
+          }
+        })(),
+        answer: question.answer,
+      })),
+    }));
+
+  const loadPaperSections = async (paperId: string) => {
+    const apiSections = await sectionsService.list(paperId);
+    return toExportSections(apiSections);
+  };
+
+  const handlePreview = async (paper: Paper) => {
+    setPreviewOpen(true);
+    setPreviewPaper(paper);
+    setPreviewLoading(true);
+    try {
+      const sections = await loadPaperSections(paper.id);
+      setPreviewSections(sections);
+    } catch {
+      setPreviewSections([]);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleDownload = async (paper: Paper) => {
+    setBusyActionPaperId(paper.id);
+    try {
+      const sections = await loadPaperSections(paper.id);
+      exportPaperAsDoc(toExportMeta(paper), sections);
+    } finally {
+      setBusyActionPaperId(null);
+    }
+  };
+
+  const handleCopy = async (paper: Paper) => {
+    setBusyActionPaperId(paper.id);
+    try {
+      const sections = await loadPaperSections(paper.id);
+      const text = buildPaperText(toExportMeta(paper), sections);
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // no-op if clipboard is not available
+    } finally {
+      setBusyActionPaperId(null);
+    }
+  };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this paper?")) return;
@@ -183,14 +274,31 @@ function Dashboard() {
                       <td className="py-4 px-2"><StatusBadge status={p.status} /></td>
                       <td className="py-4 px-6">
                         <div className="flex items-center justify-end gap-1">
-                          {[Eye, Download, Copy].map((Icon, i) => (
-                            <button
-                              key={i}
-                              className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center transition"
-                            >
-                              <Icon className="h-4 w-4" />
-                            </button>
-                          ))}
+                          <button
+                            onClick={() => handlePreview(p)}
+                            className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center transition"
+                            title="Preview"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDownload(p)}
+                            disabled={busyActionPaperId === p.id}
+                            className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center transition disabled:opacity-50"
+                            title="Download"
+                          >
+                            {busyActionPaperId === p.id
+                              ? <Loader2 className="h-4 w-4 animate-spin" />
+                              : <Download className="h-4 w-4" />}
+                          </button>
+                          <button
+                            onClick={() => handleCopy(p)}
+                            disabled={busyActionPaperId === p.id}
+                            className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center transition disabled:opacity-50"
+                            title="Copy"
+                          >
+                            <Copy className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={() => handleDelete(p.id)}
                             disabled={deleting === p.id}
@@ -234,6 +342,71 @@ function Dashboard() {
           </div>
         </div>
       </section>
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{previewPaper?.title || "Paper Preview"}</DialogTitle>
+            <DialogDescription>
+              {previewPaper ? `${previewPaper.subject} | ${previewPaper.duration_minutes} minutes | ${previewPaper.total_marks} marks` : ""}
+            </DialogDescription>
+          </DialogHeader>
+
+          {previewLoading ? (
+            <div className="py-10 text-center text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+              Loading questions...
+            </div>
+          ) : previewSections.length === 0 ? (
+            <div className="py-10 text-center text-muted-foreground">No generated content found for this paper yet.</div>
+          ) : (
+            <div className="space-y-6">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => previewPaper && openPaperPreviewWindow(toExportMeta(previewPaper), previewSections)}
+                  className="px-3.5 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40"
+                >
+                  Open full preview
+                </button>
+                <button
+                  onClick={() => previewPaper && exportPaperAsPdf(toExportMeta(previewPaper), previewSections)}
+                  className="px-3.5 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40"
+                >
+                  Download PDF
+                </button>
+                <button
+                  onClick={() => previewPaper && exportPaperAsDoc(toExportMeta(previewPaper), previewSections)}
+                  className="px-3.5 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40"
+                >
+                  Download DOC
+                </button>
+              </div>
+
+              <article className="rounded-xl border border-border bg-surface/40 p-5 space-y-5">
+                {previewSections.map((section, secIndex) => (
+                  <section key={`${section.title}-${secIndex}`}>
+                    <h3 className="font-semibold">{section.title}</h3>
+                    {section.instructions && (
+                      <p className="text-xs italic text-muted-foreground mt-1">{section.instructions}</p>
+                    )}
+                    <ol className="mt-3 space-y-3">
+                      {section.questions.map((question, qIndex) => (
+                        <li key={`${question.text}-${qIndex}`} className="text-sm">
+                          <p>
+                            <span className="font-semibold mr-2">{qIndex + 1}.</span>
+                            {question.text}
+                            <span className="text-muted-foreground ml-2">({question.marks}m)</span>
+                          </p>
+                        </li>
+                      ))}
+                    </ol>
+                  </section>
+                ))}
+              </article>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

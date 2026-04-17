@@ -1,10 +1,16 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+BASE_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_SQLITE_PATH = BASE_DIR / "examforge.db"
 
-    DATABASE_URL: str = "sqlite+aiosqlite:///./examforge.db"
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=str(BASE_DIR / ".env"), extra="ignore")
+
+    DATABASE_URL: str = f"sqlite+aiosqlite:///{DEFAULT_SQLITE_PATH.as_posix()}"
     JWT_SECRET: str = "change_this_to_a_long_random_string"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
