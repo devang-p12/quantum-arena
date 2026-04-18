@@ -26,6 +26,7 @@ class QuestionBankEntry(Base):
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Metadata
+    is_pyq: Mapped[bool] = mapped_column(Boolean, default=False)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False)
     usage_count: Mapped[int] = mapped_column(Integer, default=0)
 

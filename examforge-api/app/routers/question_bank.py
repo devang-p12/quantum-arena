@@ -10,7 +10,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
@@ -27,6 +27,7 @@ async def list_bank(
     q_type: Optional[str] = Query(None),
     difficulty: Optional[str] = Query(None),
     bloom: Optional[str] = Query(None),
+    is_pyq: Optional[bool] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -34,13 +35,20 @@ async def list_bank(
 ):
     q = select(QuestionBankEntry)
     if topic:
-        q = q.where(QuestionBankEntry.topic.ilike(f"%{topic}%"))
+        q = q.where(
+            or_(
+                QuestionBankEntry.topic.ilike(f"%{topic}%"),
+                QuestionBankEntry.text.ilike(f"%{topic}%")
+            )
+        )
     if q_type:
         q = q.where(QuestionBankEntry.q_type == q_type)
     if difficulty:
         q = q.where(QuestionBankEntry.difficulty == difficulty)
     if bloom:
         q = q.where(QuestionBankEntry.bloom == bloom)
+    if is_pyq is not None:
+        q = q.where(QuestionBankEntry.is_pyq == is_pyq)
     q = q.order_by(QuestionBankEntry.usage_count.desc()).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(q)
     return result.scalars().all()
@@ -61,6 +69,28 @@ async def add_to_bank(
     await db.commit()
     await db.refresh(entry)
     return entry
+
+
+@router.post("/bulk", response_model=list[QuestionBankOut], status_code=status.HTTP_201_CREATED)
+async def add_to_bank_bulk(
+    body: list[QuestionBankCreate],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    entries = []
+    for item in body:
+        entry = QuestionBankEntry(
+            id=str(uuid.uuid4()),
+            created_by=current_user.id,
+            **item.model_dump(),
+        )
+        db.add(entry)
+        entries.append(entry)
+    await db.commit()
+    for entry in entries:
+        await db.refresh(entry)
+    return entries
+
 
 
 @router.get("/{entry_id}", response_model=QuestionBankOut)

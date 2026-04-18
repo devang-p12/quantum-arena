@@ -12,6 +12,7 @@ class QuestionBankCreate(BaseModel):
     text: str
     options: Optional[str] = None
     answer: Optional[str] = None
+    is_pyq: bool = False
 
 
 class QuestionBankUpdate(BaseModel):
@@ -23,6 +24,7 @@ class QuestionBankUpdate(BaseModel):
     text: Optional[str] = None
     options: Optional[str] = None
     answer: Optional[str] = None
+    is_pyq: Optional[bool] = None
 
 
 class QuestionBankOut(BaseModel):
@@ -35,6 +37,7 @@ class QuestionBankOut(BaseModel):
     text: str
     options: Optional[str] = None
     answer: Optional[str] = None
+    is_pyq: bool
     is_ai_generated: bool
     usage_count: int
     created_at: datetime

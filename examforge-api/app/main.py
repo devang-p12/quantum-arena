@@ -18,6 +18,7 @@ app.add_middleware(
         "http://localhost:4173",  # Vite preview
         "http://localhost:8080",  # TanStack Start default
         "http://localhost:8081",  # TanStack Start (fallback)
+        "http://localhost:8082",
         "http://127.0.0.1:8080",
         "http://127.0.0.1:8081",
     ],

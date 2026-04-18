@@ -34,8 +34,8 @@ export const Route = createFileRoute("/")({
 
 const quickActions = [
   { label: "New Exam Paper", desc: "Start a paper from scratch", icon: Plus, to: "/create" as const },
-  { label: "Browse Question Bank", desc: "Search & filter saved questions", icon: Search, to: "/create" as const },
-  { label: "Import Questions", desc: "Bulk import from CSV / JSON", icon: FileUp, to: "/create" as const },
+  { label: "Browse Question Bank", desc: "Search & filter saved questions", icon: Search, to: "/question-bank" as const },
+  { label: "Import Questions", desc: "Bulk import from CSV / JSON", icon: FileUp, to: "/question-bank" as const },
   { label: "View Analytics", desc: "Track quality & usage", icon: TrendingUp, to: "/analytics" as const },
 ];
 
