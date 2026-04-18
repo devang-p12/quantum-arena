@@ -210,7 +210,7 @@ quantum-arena/
 
 ## 6) Environment configuration
 
-## Backend (`examforge-api/.env`)
+### Backend (`examforge-api/.env`)
 
 Supported settings in `app/config.py`:
 
@@ -225,7 +225,7 @@ Supported settings in `app/config.py`:
 
 > Without `OPENROUTER_API_KEY`, AI parsing/generation endpoints cannot produce model output.
 
-## Frontend (`paper-weaver/.env`)
+### Frontend (`paper-weaver/.env`)
 
 - `VITE_API_URL=http://localhost:8000`
 
@@ -233,7 +233,7 @@ Supported settings in `app/config.py`:
 
 ## 7) Local development setup
 
-## A) Run backend
+### A) Run backend
 
 ```bash
 cd examforge-api
@@ -244,7 +244,7 @@ alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
-## B) Run frontend
+### B) Run frontend
 
 ```bash
 cd paper-weaver
