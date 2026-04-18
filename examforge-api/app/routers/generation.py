@@ -9,6 +9,7 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,9 +24,68 @@ from app.models.user import User
 
 router = APIRouter(tags=["AI Generation"])
 
+
+class RefineQuestionIn(BaseModel):
+    draft_text: str = Field(..., min_length=8)
+
+
+def _fallback_chart_spec(topic: str, chart_type: str | None, chart_mode: str | None) -> dict:
+    resolved_type = chart_type or "line"
+    resolved_mode = chart_mode or "student_plot"
+    title = f"{topic} - {'Plot' if resolved_mode == 'student_plot' else 'Analysis'}"
+    return {
+        "chart_type": resolved_type,
+        "title": title,
+        "x_label": "X Axis",
+        "y_label": "Y Axis",
+        "points": [
+            {"x": 1, "y": 10},
+            {"x": 2, "y": 14},
+            {"x": 3, "y": 19},
+            {"x": 4, "y": 27},
+            {"x": 5, "y": 33},
+        ],
+    }
+
+
+def _resolved_chart_spec(generated: dict, topic: str, chart_type: str | None, chart_mode: str | None) -> dict:
+    chart_spec = generated.get("chart_spec")
+    if isinstance(chart_spec, dict) and chart_spec.get("points"):
+        chart_spec.setdefault("chart_type", chart_type or "line")
+        chart_spec.setdefault("x_label", "X Axis")
+        chart_spec.setdefault("y_label", "Y Axis")
+        chart_spec.setdefault("title", f"{topic} - Generated Chart")
+        return chart_spec
+    return _fallback_chart_spec(topic=topic, chart_type=chart_type, chart_mode=chart_mode)
+
 # ── Prompt builder ────────────────────────────────────────────
 
-def build_question_prompt(topic: str, q_type: str, difficulty: str, bloom: str, marks: int, subject: str) -> str:
+def build_question_prompt(
+    topic: str,
+    q_type: str,
+    difficulty: str,
+    bloom: str,
+    marks: int,
+    subject: str,
+    requires_chart: bool,
+    chart_type: str | None,
+    chart_mode: str | None,
+) -> str:
+    visual_instruction = ""
+    if requires_chart:
+        resolved_mode = chart_mode or "student_plot"
+        mode_instruction = (
+            "The student must PLOT the graph using generated values. "
+            if resolved_mode == "student_plot"
+            else "The student must ANALYZE the provided generated graph. "
+        )
+        visual_instruction = (
+            "\nThis question REQUIRES chart/graph support. "
+            + mode_instruction
+            + f"Generate numeric values from the topic and return chart_spec using chart_type='{chart_type or 'line'}'. "
+            + "chart_spec must include: chart_type, title, x_label, y_label, and points as a list of {x, y}."
+        )
+
     return f"""You are an expert university examiner.
 Write ONE exam question with the following requirements:
 - Subject: {subject}
@@ -34,12 +94,20 @@ Write ONE exam question with the following requirements:
 - Difficulty: {difficulty}
 - Bloom's taxonomy level: {bloom}
 - Marks: {marks}
+{visual_instruction}
 
 Respond with ONLY valid JSON (no markdown) in this format:
 {{
   "text": "The full question text here",
   "options": ["Option A", "Option B", "Option C", "Option D"] or null if not MCQ,
-  "answer": "Correct answer or null"
+    "answer": "Correct answer or null",
+    "chart_spec": null or {{
+        "chart_type": "line|bar|scatter|pie",
+        "title": "Short chart title",
+        "x_label": "X axis label",
+        "y_label": "Y axis label",
+        "points": [{{"x": number|string, "y": number}}]
+    }}
 }}"""
 
 
@@ -66,7 +134,83 @@ async def _call_openrouter(prompt: str) -> dict:
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
         return json.loads(content.strip())
+
+
+def build_refine_prompt(
+    topic: str,
+    q_type: str,
+    difficulty: str,
+    bloom: str,
+    marks: int,
+    subject: str,
+    draft_text: str,
+    requires_chart: bool,
+    chart_type: str | None,
+    chart_mode: str | None,
+) -> str:
+    visual_instruction = ""
+    if requires_chart:
+        resolved_mode = chart_mode or "student_plot"
+        mode_instruction = (
+            "The student must PLOT the graph using generated values. "
+            if resolved_mode == "student_plot"
+            else "The student must ANALYZE the provided generated graph. "
+        )
+        visual_instruction = (
+            "\nThis question requires chart/graph support. "
+            + mode_instruction
+            + f"Use chart_type='{chart_type or 'line'}'. Return chart_spec with x/y labels and points."
+        )
+
+    return f"""You are an expert examiner refining a draft exam question.
+
+Requirements:
+- Subject: {subject}
+- Topic: {topic}
+- Question type: {q_type}
+- Difficulty: {difficulty}
+- Bloom level: {bloom}
+- Marks: {marks}
+{visual_instruction}
+
+Draft question to refine:
+{draft_text}
+
+Respond with ONLY valid JSON:
+{{
+  "text": "Refined question text",
+  "options": ["Option A", "Option B", "Option C", "Option D"] or null,
+  "answer": "Correct answer or null",
+  "chart_spec": null or {{
+    "chart_type": "line|bar|scatter|pie",
+    "title": "Short chart title",
+    "x_label": "X axis label",
+    "y_label": "Y axis label",
+    "points": [{{"x": number|string, "y": number}}]
+  }}
+}}"""
+
+
+def build_answer_key_prompt(question_text: str, q_type: str, marks: int, subject: str) -> str:
+    return f"""You are an expert examiner preparing a concise answer key.
+Generate ONLY the model answer for this question.
+
+- Subject: {subject}
+- Question type: {q_type}
+- Marks: {marks}
+- Question text: {question_text}
+
+Respond with ONLY valid JSON (no markdown) in this format:
+{{
+    "answer": "Concise model answer text"
+}}"""
 
 
 async def _try_bank(
@@ -129,20 +273,23 @@ async def generate_paper(
                 continue
 
             # 1. Try question bank first
-            bank_match = await _try_bank(
-                db,
-                topic=question.topic,
-                q_type=question.q_type,
-                difficulty=question.difficulty,
-                bloom=question.bloom,
-                used_ids=used_bank_ids,
-            )
+            bank_match = None
+            if not question.requires_chart:
+                bank_match = await _try_bank(
+                    db,
+                    topic=question.topic,
+                    q_type=question.q_type,
+                    difficulty=question.difficulty,
+                    bloom=question.bloom,
+                    used_ids=used_bank_ids,
+                )
 
             if bank_match:
                 # Fill from bank
                 question.text = bank_match.text
                 question.options = bank_match.options
                 question.answer = bank_match.answer
+                question.chart_spec = None
                 bank_match.usage_count += 1
                 used_bank_ids.add(bank_match.id)
                 bank_count += 1
@@ -157,12 +304,26 @@ async def generate_paper(
                         bloom=question.bloom,
                         marks=question.marks,
                         subject=paper.subject or "General",
+                        requires_chart=question.requires_chart,
+                        chart_type=question.chart_type,
+                        chart_mode=question.chart_mode,
                     )
                     generated = await _call_openrouter(prompt)
                     question.text = generated.get("text", "")
                     opts = generated.get("options")
                     question.options = json.dumps(opts) if opts else None
                     question.answer = generated.get("answer")
+                    chart_spec = (
+                        _resolved_chart_spec(
+                            generated,
+                            topic=question.topic,
+                            chart_type=question.chart_type,
+                            chart_mode=question.chart_mode,
+                        )
+                        if question.requires_chart
+                        else None
+                    )
+                    question.chart_spec = json.dumps(chart_spec) if chart_spec else None
 
                     # Save to question bank for future reuse
                     bank_entry = QuestionBankEntry(
@@ -229,14 +390,149 @@ async def regenerate_question(
             bloom=question.bloom,
             marks=question.marks,
             subject=subject,
+            requires_chart=question.requires_chart,
+            chart_type=question.chart_type,
+            chart_mode=question.chart_mode,
         )
         generated = await _call_openrouter(prompt)
         question.text = generated.get("text", question.text)
         opts = generated.get("options")
         question.options = json.dumps(opts) if opts else None
         question.answer = generated.get("answer")
+        chart_spec = (
+            _resolved_chart_spec(
+                generated,
+                topic=question.topic,
+                chart_type=question.chart_type,
+                chart_mode=question.chart_mode,
+            )
+            if question.requires_chart
+            else None
+        )
+        question.chart_spec = json.dumps(chart_spec) if chart_spec else None
         await db.commit()
         await db.refresh(question)
         return question
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI generation failed: {str(e)}")
+
+
+@router.post("/papers/{paper_id}/generate-answer-key")
+async def generate_answer_key(
+    paper_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate model answers for all questions in a paper."""
+    res = await db.execute(select(Paper).where(Paper.id == paper_id, Paper.user_id == current_user.id))
+    paper = res.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found.")
+
+    res = await db.execute(
+        select(Section)
+        .options(selectinload(Section.questions))
+        .where(Section.paper_id == paper_id)
+        .order_by(Section.order_index)
+    )
+    sections = res.scalars().all()
+
+    updated = 0
+    errors = []
+
+    for section in sections:
+        for question in section.questions:
+            if not question.text or not question.text.strip():
+                continue
+
+            try:
+                prompt = build_answer_key_prompt(
+                    question_text=question.text,
+                    q_type=question.q_type,
+                    marks=question.marks,
+                    subject=paper.subject or "General",
+                )
+                generated = await _call_openrouter(prompt)
+                answer = (generated.get("answer") or "").strip()
+                if answer:
+                    question.answer = answer
+                    updated += 1
+
+                if question.requires_chart and not question.chart_spec:
+                    fallback = _fallback_chart_spec(
+                        topic=question.topic,
+                        chart_type=question.chart_type,
+                        chart_mode=question.chart_mode,
+                    )
+                    question.chart_spec = json.dumps(fallback)
+            except Exception as e:
+                errors.append({"question_id": question.id, "detail": str(e)})
+
+    await db.commit()
+
+    return {
+        "paper_id": paper_id,
+        "updated": updated,
+        "errors": errors,
+    }
+
+
+@router.post("/sections/questions/{question_id}/refine")
+async def refine_question(
+    question_id: str,
+    body: RefineQuestionIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Refine edited question text through LLM while preserving slot constraints."""
+    res = await db.execute(
+        select(Question)
+        .join(Section, Section.id == Question.section_id)
+        .join(Paper, Paper.id == Section.paper_id)
+        .where(Question.id == question_id, Paper.user_id == current_user.id)
+    )
+    question = res.scalar_one_or_none()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found.")
+
+    res2 = await db.execute(
+        select(Paper.subject)
+        .join(Section, Section.paper_id == Paper.id)
+        .where(Section.id == question.section_id)
+    )
+    subject = res2.scalar_one_or_none() or "General"
+
+    try:
+        prompt = build_refine_prompt(
+            topic=question.topic,
+            q_type=question.q_type,
+            difficulty=question.difficulty,
+            bloom=question.bloom,
+            marks=question.marks,
+            subject=subject,
+            draft_text=body.draft_text,
+            requires_chart=question.requires_chart,
+            chart_type=question.chart_type,
+            chart_mode=question.chart_mode,
+        )
+        generated = await _call_openrouter(prompt)
+        question.text = generated.get("text", body.draft_text)
+        opts = generated.get("options")
+        question.options = json.dumps(opts) if opts else None
+        question.answer = generated.get("answer")
+        chart_spec = (
+            _resolved_chart_spec(
+                generated,
+                topic=question.topic,
+                chart_type=question.chart_type,
+                chart_mode=question.chart_mode,
+            )
+            if question.requires_chart
+            else None
+        )
+        question.chart_spec = json.dumps(chart_spec) if chart_spec else None
+        await db.commit()
+        await db.refresh(question)
+        return question
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Question refinement failed: {str(e)}")

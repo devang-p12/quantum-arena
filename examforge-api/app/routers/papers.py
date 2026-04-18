@@ -97,7 +97,7 @@ async def delete_paper(
 async def parse_pattern(
     file: Optional[UploadFile] = File(None),
     text: Optional[str] = Form(None),
-    current_user: User = Depends(get_current_user),
+    exam_type: Optional[str] = Form(None),
 ):
     if not file and not text:
         raise HTTPException(status_code=400, detail="Must provide either a file or text description.")
@@ -110,7 +110,7 @@ async def parse_pattern(
         raw_text += "\n" + text
         
     try:
-        blueprint = await parse_blueprint_to_json(raw_text)
+        blueprint = await parse_blueprint_to_json(raw_text, exam_type=exam_type)
         return blueprint
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI Parsing failed: {str(e)}")

@@ -10,6 +10,7 @@ import { papersService } from "@/lib/papersService";
 import { sectionsService, questionsService } from "@/lib/sectionsService";
 import {
   exportPaperAsDoc,
+  exportAnswerKeyOnlyAsTxt,
   exportPaperAsHtml,
   exportPaperAsLatex,
   exportPaperAsPdf,
@@ -18,6 +19,7 @@ import {
   type ExportMeta,
   type ExportSection,
 } from "@/lib/paperExport";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/create")({
   head: () => ({
@@ -34,6 +36,9 @@ export const Route = createFileRoute("/create")({
 type Difficulty = "Easy" | "Medium" | "Hard";
 type BTLevel = "Remember" | "Understand" | "Apply" | "Analyze" | "Evaluate" | "Create";
 type QType = "MCQ" | "Short Answer" | "Long Answer" | "Numerical" | "True/False" | "Fill in the Blank";
+type ChartType = "line" | "bar" | "scatter" | "pie";
+type ChartMode = "student_plot" | "analyze_graph";
+type PaperStyle = "Theoretical" | "MCQ" | "Viva" | "Internal Assessment";
 
 interface Question {
   id: string;
@@ -42,6 +47,10 @@ interface Question {
   marks: number;
   difficulty: Difficulty;
   bloom: BTLevel;
+  requiresChart?: boolean;
+  chartType?: ChartType;
+  chartMode?: ChartMode;
+  chartSpec?: string;
   text: string;
   options?: string[];
   answer?: string;
@@ -64,6 +73,11 @@ const SUBJECTS = [
 ];
 
 const Q_TYPES: QType[] = ["MCQ", "Short Answer", "Long Answer", "Numerical", "True/False", "Fill in the Blank"];
+const CHART_TYPES: ChartType[] = ["line", "bar", "scatter", "pie"];
+const CHART_MODES: { value: ChartMode; label: string }[] = [
+  { value: "student_plot", label: "Student Plots" },
+  { value: "analyze_graph", label: "Analyze Generated Graph" },
+];
 const DIFFS: Difficulty[] = ["Easy", "Medium", "Hard"];
 const BLOOMS: BTLevel[] = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"];
 
@@ -138,6 +152,165 @@ const diffTone: Record<Difficulty, string> = {
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
+const parseChartSpec = (raw?: unknown) => {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  if (typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+};
+
+const parseOptions = (raw?: unknown): string[] | undefined => {
+  if (!raw) return undefined;
+  if (Array.isArray(raw)) return raw.map((v) => String(v));
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.map((v) => String(v)) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+};
+
+const toSafeMarks = (raw: unknown): number => {
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.max(0, Math.round(raw));
+  if (typeof raw === "string") {
+    const n = parseInt(raw.replace(/[^\d-]/g, ""), 10);
+    return Number.isFinite(n) ? Math.max(0, n) : 1;
+  }
+  return 1;
+};
+
+const toSafeDifficulty = (raw: unknown): Difficulty => {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "easy") return "Easy";
+  if (v === "hard") return "Hard";
+  return "Medium";
+};
+
+const toSafeChartType = (raw: unknown): ChartType => {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "bar" || v === "scatter" || v === "pie") return v;
+  return "line";
+};
+
+const toSafeChartMode = (raw: unknown): ChartMode => {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "analyze_graph") return "analyze_graph";
+  return "student_plot";
+};
+
+const isUnauthorizedError = (err: unknown): boolean => {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("not authenticated") || msg.includes("unauthorized") || msg.includes("credentials");
+};
+
+const formatAxisValue = (value: unknown): string => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value ?? "");
+  if (Math.abs(n) >= 1_000_000) return n.toExponential(1);
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+};
+
+const ChartPreview = ({ chartType, chartSpec }: { chartType?: ChartType; chartSpec: any }) => {
+  const points = Array.isArray(chartSpec?.points) ? chartSpec.points.slice(0, 20) : [];
+  if (!points.length) return null;
+
+  const width = 520;
+  const height = 250;
+  const pad = 32;
+  const plotW = width - pad * 2;
+  const plotH = height - pad * 2;
+
+  const ys = points.map((p: any) => Number(p?.y ?? 0));
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const denom = maxY - minY || 1;
+
+  const xLabel = String(chartSpec?.x_label || "X");
+  const yLabel = String(chartSpec?.y_label || "Y");
+  const xMin = points[0]?.x;
+  const xMax = points[points.length - 1]?.x;
+
+  const mapped = points.map((p: any, i: number) => {
+    const x = pad + (i / Math.max(points.length - 1, 1)) * plotW;
+    const y = pad + plotH - ((Number(p?.y ?? 0) - minY) / denom) * plotH;
+    return { x, y };
+  });
+
+  const type = chartType || chartSpec?.chart_type || "line";
+
+  return (
+    <div className="mt-2 overflow-x-auto rounded-md border border-border bg-card p-2">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="generated chart preview">
+        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} stroke="#6b7280" />
+        <line x1={pad} y1={pad} x2={pad} y2={height - pad} stroke="#6b7280" />
+
+        {type !== "pie" && (
+          <>
+            <text x={width / 2} y={height - 6} textAnchor="middle" fontSize="11" fill="#4b5563">{xLabel}</text>
+            <text x={10} y={height / 2} textAnchor="middle" fontSize="11" fill="#4b5563" transform={`rotate(-90 10 ${height / 2})`}>{yLabel}</text>
+
+            <text x={pad} y={height - pad + 14} textAnchor="middle" fontSize="10" fill="#6b7280">{formatAxisValue(xMin)}</text>
+            <text x={width - pad} y={height - pad + 14} textAnchor="middle" fontSize="10" fill="#6b7280">{formatAxisValue(xMax)}</text>
+            <text x={pad - 8} y={pad + 4} textAnchor="end" fontSize="10" fill="#6b7280">{formatAxisValue(maxY)}</text>
+            <text x={pad - 8} y={height - pad + 4} textAnchor="end" fontSize="10" fill="#6b7280">{formatAxisValue(minY)}</text>
+          </>
+        )}
+
+        {type === "bar" && mapped.map((p, i) => {
+          const bw = plotW / points.length * 0.7;
+          const h = height - pad - p.y;
+          return <rect key={i} x={p.x - bw / 2} y={p.y} width={bw} height={h} fill="#3b82f6" opacity="0.82" />;
+        })}
+
+        {type === "scatter" && mapped.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={4} fill="#2563eb" />
+        ))}
+
+        {type === "line" && (
+          <>
+            <polyline
+              points={mapped.map((p) => `${p.x},${p.y}`).join(" ")}
+              fill="none"
+              stroke="#2563eb"
+              strokeWidth={2}
+            />
+            {mapped.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={3} fill="#2563eb" />)}
+          </>
+        )}
+
+        {type === "pie" && (() => {
+          const total = ys.reduce((a, b) => a + Math.max(0, b), 0) || 1;
+          const cx = width / 2;
+          const cy = height / 2;
+          const r = Math.min(plotW, plotH) / 2.2;
+          let angle = -Math.PI / 2;
+          const colors = ["#2563eb", "#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6"];
+          return ys.map((v, i) => {
+            const frac = Math.max(0, v) / total;
+            const next = angle + frac * Math.PI * 2;
+            const x1 = cx + r * Math.cos(angle);
+            const y1 = cy + r * Math.sin(angle);
+            const x2 = cx + r * Math.cos(next);
+            const y2 = cy + r * Math.sin(next);
+            const large = frac > 0.5 ? 1 : 0;
+            const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+            angle = next;
+            return <path key={i} d={d} fill={colors[i % colors.length]} opacity={0.9} />;
+          });
+        })()}
+      </svg>
+    </div>
+  );
+};
+
 /* ============================================================
    Main component
    ============================================================ */
@@ -154,6 +327,7 @@ function PaperCreation() {
     notes: "",
     fileName: "",
     fileData: null as File | null,
+    paperStyle: "Theoretical" as PaperStyle,
   });
   const [meta, setMeta] = useState({
     subject: "Computer Science",
@@ -190,7 +364,8 @@ function PaperCreation() {
       try {
         const blueprint = await papersService.parsePattern(
           pattern.method === "manual" ? pattern.notes : undefined,
-          pattern.method === "upload" ? pattern.fileData || undefined : undefined
+          pattern.method === "upload" ? pattern.fileData || undefined : undefined,
+          pattern.paperStyle
         );
         // Pre-fill Step 2 & 3
         setMeta((prev) => ({
@@ -211,9 +386,13 @@ function PaperCreation() {
               id: uid(),
               topic: q.topic || "Unknown",
               type: q.type || "Short Answer",
-              marks: q.marks || 1,
-              difficulty: q.difficulty || "Medium",
+              marks: toSafeMarks(q.marks),
+              difficulty: toSafeDifficulty(q.difficulty),
               bloom: q.bloom || "Understand",
+              requiresChart: Boolean(q.requires_chart),
+              chartType: Boolean(q.requires_chart) ? toSafeChartType(q.chart_type) : undefined,
+              chartMode: Boolean(q.requires_chart) ? toSafeChartMode(q.chart_mode) : undefined,
+              chartSpec: undefined,
               text: "Question will be generated based on this slot...",
             })),
           }));
@@ -221,7 +400,8 @@ function PaperCreation() {
         }
       } catch (err) {
         console.error(err);
-        setSaveError("Failed to parse pattern via AI. Advancing with defaults.");
+        const detail = err instanceof Error ? err.message : "Unknown error";
+        setSaveError(`Failed to parse pattern via AI (${detail}). Advancing with defaults.`);
         setSaving(false);
         // Delay before moving so they see the error if they want? Or just move after a sec.
       }
@@ -248,8 +428,15 @@ function PaperCreation() {
             total_marks: meta.totalMarks,
           });
         }
-      } catch {
-        setSaveError("Failed to save paper — check your connection and try again.");
+      } catch (err) {
+        if (isUnauthorizedError(err)) {
+          setSaveError("Session expired or not signed in. Redirecting to login...");
+          toast.error("Please sign in to save the paper.");
+          navigate({ to: "/auth" });
+        } else {
+          const detail = err instanceof Error ? err.message : "Unknown error";
+          setSaveError(`Failed to save paper (${detail}). Check your connection and try again.`);
+        }
         setSaving(false);
         return;
       } finally {
@@ -275,12 +462,19 @@ function PaperCreation() {
           const newQs: Question[] = [];
           for (let j = 0; j < sec.questions.length; j++) {
             const q = sec.questions[j];
+            const safeMarks = toSafeMarks(q.marks);
+            const safeDifficulty = toSafeDifficulty(q.difficulty);
+            const safeChartType = q.requiresChart ? toSafeChartType(q.chartType) : null;
+            const safeChartMode = q.requiresChart ? toSafeChartMode(q.chartMode) : null;
             const newQ = await questionsService.create(newSec.id, {
-              topic: q.topic,
+              topic: q.topic || "General",
               q_type: q.type,
-              marks: q.marks,
-              difficulty: q.difficulty,
-              bloom: q.bloom,
+              marks: safeMarks,
+              difficulty: safeDifficulty,
+              bloom: q.bloom || "Understand",
+              requires_chart: !!q.requiresChart,
+              chart_type: safeChartType,
+              chart_mode: safeChartMode,
               text: q.text,
               order_index: j,
             });
@@ -306,8 +500,12 @@ function PaperCreation() {
             marks: q.marks,
             difficulty: q.difficulty,
             bloom: q.bloom,
+            requiresChart: !!q.requires_chart,
+            chartType: q.requires_chart ? ((q.chart_type || "line") as ChartType) : undefined,
+            chartMode: q.requires_chart ? ((q.chart_mode || "student_plot") as ChartMode) : undefined,
+            chartSpec: parseChartSpec(q.chart_spec) || undefined,
             text: q.text,
-            options: q.options ? JSON.parse(q.options) : undefined,
+            options: parseOptions(q.options),
             answer: q.answer,
             starred: q.starred,
           })),
@@ -315,7 +513,14 @@ function PaperCreation() {
         setSections(mappedFresh);
       } catch (err) {
         console.error(err);
-        setSaveError("Failed to generate questions. Try again.");
+        if (isUnauthorizedError(err)) {
+          setSaveError("Session expired or not signed in. Redirecting to login...");
+          toast.error("Please sign in to continue generation.");
+          navigate({ to: "/auth" });
+        } else {
+          const detail = err instanceof Error ? err.message : "Unknown error";
+          setSaveError(`Failed to generate questions (${detail}).`);
+        }
         setSaving(false);
         return;
       }
@@ -366,6 +571,8 @@ function PaperCreation() {
           <StepExport
             meta={meta}
             sections={sections}
+            setSections={setSections}
+            paperId={paperId}
             totalQuestions={totalQuestions}
             totalMarks={totalMarksCalc}
           />
@@ -464,7 +671,7 @@ function StepPattern({
   value,
   onChange,
 }: {
-  value: { method: "upload" | "manual" | "template"; notes: string; fileName: string; fileData: File | null };
+  value: { method: "upload" | "manual" | "template"; notes: string; fileName: string; fileData: File | null; paperStyle: PaperStyle };
   onChange: (v: typeof value) => void;
 }) {
   const tabs = [
@@ -506,6 +713,34 @@ function StepPattern({
           );
         })}
       </div>
+
+      {(value.method === "upload" || value.method === "manual") && (
+        <div className="rounded-xl border border-border bg-surface p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">Paper Type</h3>
+            <p className="text-xs text-muted-foreground mt-1">
+              Choose the evaluation style before blueprint generation.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {(["Theoretical", "MCQ", "Viva", "Internal Assessment"] as PaperStyle[]).map((style) => (
+              <button
+                key={style}
+                type="button"
+                onClick={() => onChange({ ...value, paperStyle: style })}
+                className={cn(
+                  "px-3 py-2 rounded-lg border text-xs font-semibold transition",
+                  value.paperStyle === style
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-card border-border text-muted-foreground hover:text-foreground hover:border-primary/40"
+                )}
+              >
+                {style}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {value.method === "upload" && (
         <label className="block group cursor-pointer">
@@ -702,7 +937,7 @@ function StepBlueprint({
         ...s,
         questions: [...s.questions, {
           id: uid(), topic: "New Topic", type: "Short Answer", marks: 5,
-          difficulty: "Medium", bloom: "Understand", text: "",
+          difficulty: "Medium", bloom: "Understand", requiresChart: false, chartType: "line", chartMode: "student_plot", chartSpec: undefined, text: "",
         }],
       }
     ));
@@ -788,6 +1023,7 @@ function StepBlueprint({
                           <th className="py-2.5 px-3 text-left font-semibold w-20">Marks</th>
                           <th className="py-2.5 px-3 text-left font-semibold">Difficulty</th>
                           <th className="py-2.5 px-3 text-left font-semibold">Bloom Level</th>
+                          <th className="py-2.5 px-3 text-left font-semibold">Visual</th>
                           <th className="py-2.5 px-3 text-right font-semibold w-16"></th>
                         </tr>
                       </thead>
@@ -815,6 +1051,35 @@ function StepBlueprint({
                               <select value={q.bloom} onChange={(e) => updateQ(s.id, q.id, { bloom: e.target.value as BTLevel })} className="bg-surface border border-border rounded px-2 py-1 text-xs">
                                 {BLOOMS.map((b) => <option key={b}>{b}</option>)}
                               </select>
+                            </td>
+                            <td className="py-2 px-3">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={q.requiresChart}
+                                  onChange={(e) => updateQ(s.id, q.id, { requiresChart: e.target.checked, chartType: e.target.checked ? (q.chartType || "line") : undefined, chartMode: e.target.checked ? (q.chartMode || "student_plot") : undefined })}
+                                  className="h-4 w-4 rounded border-border bg-surface"
+                                  title="Require graph/chart for this question"
+                                />
+                                {q.requiresChart && (
+                                  <div className="flex items-center gap-1">
+                                    <select
+                                      value={q.chartType || "line"}
+                                      onChange={(e) => updateQ(s.id, q.id, { chartType: e.target.value as ChartType })}
+                                      className="bg-surface border border-border rounded px-2 py-1 text-xs"
+                                    >
+                                      {CHART_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                    <select
+                                      value={q.chartMode || "student_plot"}
+                                      onChange={(e) => updateQ(s.id, q.id, { chartMode: e.target.value as ChartMode })}
+                                      className="bg-surface border border-border rounded px-2 py-1 text-xs"
+                                    >
+                                      {CHART_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td className="py-2 px-3 text-right">
                               <button onClick={() => removeQ(s.id, q.id)} className="text-muted-foreground hover:text-rose">
@@ -853,6 +1118,23 @@ function StepLivePaper({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [regenId, setRegenId] = useState<string | null>(null);
 
+  const mapApiQuestionToLocal = (q: any): Question => ({
+    id: q.id,
+    topic: q.topic,
+    type: q.q_type as QType,
+    marks: q.marks,
+    difficulty: q.difficulty as Difficulty,
+    bloom: q.bloom as BTLevel,
+    requiresChart: !!q.requires_chart,
+    chartType: q.requires_chart ? ((q.chart_type || "line") as ChartType) : undefined,
+    chartMode: q.requires_chart ? ((q.chart_mode || "student_plot") as ChartMode) : undefined,
+    chartSpec: parseChartSpec(q.chart_spec) || undefined,
+    text: q.text,
+    options: parseOptions(q.options),
+    answer: q.answer || undefined,
+    starred: q.starred,
+  });
+
   const updateQ = (sid: string, qid: string, patch: Partial<Question>) =>
     setSections(sections.map((s) =>
       s.id !== sid ? s : { ...s, questions: s.questions.map((q) => (q.id === qid ? { ...q, ...patch } : q)) }
@@ -868,29 +1150,28 @@ function StepLivePaper({
   const addQ = async (sid: string) => {
     try {
       const q = await questionsService.create(sid, {
-        topic: "Custom", q_type: "Short Answer", marks: 5, difficulty: "Medium", bloom: "Understand", text: "New question — click edit to write."
+        topic: "Custom", q_type: "Short Answer", marks: 5, difficulty: "Medium", bloom: "Understand", requires_chart: false, chart_type: null, chart_mode: null, text: "New question — click edit to write."
       });
+      const mappedQ: Question = mapApiQuestionToLocal(q);
       setSections(sections.map((s) =>
-        s.id !== sid ? s : { ...s, questions: [...s.questions, q as any] }
+        s.id !== sid ? s : { ...s, questions: [...s.questions, mappedQ] }
       ));
     } catch {}
   };
 
-  const regenerate = (sid: string, qid: string) => {
+  const regenerate = async (sid: string, qid: string) => {
     setRegenId(qid);
-    setTimeout(async () => {
-      const samples = [
-        "Critically analyze the given concept and support your answer with two real-world examples.",
-        "Compare and contrast the two approaches, highlighting at least three differences.",
-        "Derive the formula step-by-step and discuss any assumptions made.",
-        "Evaluate the impact of the topic on contemporary practice in the field.",
-        "Construct a brief case study illustrating the concept in action.",
-      ];
-      const text = samples[Math.floor(Math.random() * samples.length)];
-      try { await questionsService.update(qid, { text }); } catch {}
-      updateQ(sid, qid, { text });
+    try {
+      const regenerated = await papersService.regenerateQuestion(qid);
+      const mapped = mapApiQuestionToLocal(regenerated);
+      updateQ(sid, qid, mapped);
+      toast.success("Question regenerated.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Regeneration failed.";
+      toast.error("Failed to regenerate question.", { description: message });
+    } finally {
       setRegenId(null);
-    }, 900);
+    }
   };
 
   let qCounter = 0;
@@ -946,6 +1227,7 @@ function StepLivePaper({
                   qCounter += 1;
                   const isEditing = editingId === q.id;
                   const isRegen = regenId === q.id;
+                  const chartSpec = parseChartSpec(q.chartSpec);
                   return (
                     <li
                       key={q.id}
@@ -968,6 +1250,8 @@ function StepLivePaper({
                             <Chip>{q.topic}</Chip>
                             <Chip className={diffTone[q.difficulty]}>{q.difficulty}</Chip>
                             <Chip>{q.bloom}</Chip>
+                            {q.requiresChart && <Chip>Chart: {q.chartType || "line"}</Chip>}
+                            {q.requiresChart && <Chip>{q.chartMode === "analyze_graph" ? "Analyze Graph" : "Student Plots"}</Chip>}
                             <Chip className="bg-primary/10 text-primary border-primary/30 ml-auto">{q.marks}m</Chip>
                           </div>
 
@@ -1000,6 +1284,50 @@ function StepLivePaper({
                               ))}
                             </ol>
                           )}
+
+                          {/* Chart spec preview for visual questions */}
+                          {q.requiresChart && !isEditing && !isRegen && (
+                            <div className="mt-3 rounded-lg border border-border bg-surface p-3 text-xs">
+                              <p className="font-semibold text-foreground">
+                                Graph/Chart Data ({(q.chartType || "line").toUpperCase()})
+                              </p>
+                              <p className="mt-1 text-muted-foreground">
+                                Mode: {q.chartMode === "analyze_graph" ? "Student analyzes generated graph" : "Student plots graph from generated data"}
+                              </p>
+                              {chartSpec ? (
+                                <>
+                                  <p className="mt-1 text-muted-foreground">
+                                    {chartSpec.title || "Generated values from topic"}
+                                  </p>
+                                  {q.chartMode === "analyze_graph" && (
+                                    <ChartPreview chartType={q.chartType} chartSpec={chartSpec} />
+                                  )}
+                                  {q.chartMode === "student_plot" && Array.isArray(chartSpec.points) && chartSpec.points.length > 0 && (
+                                    <div className="mt-2 overflow-x-auto">
+                                      <table className="min-w-[220px] w-full text-[11px]">
+                                        <thead>
+                                          <tr className="text-muted-foreground">
+                                            <th className="text-left py-1 pr-4">X</th>
+                                            <th className="text-left py-1">Y</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {chartSpec.points.slice(0, 8).map((pt: any, idx: number) => (
+                                            <tr key={idx} className="border-t border-border/60">
+                                              <td className="py-1 pr-4">{String(pt?.x ?? "")}</td>
+                                              <td className="py-1">{String(pt?.y ?? "")}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <p className="mt-1 text-muted-foreground">Chart values will appear after AI generation.</p>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1029,7 +1357,16 @@ function StepLivePaper({
                         {isEditing ? (
                           <button
                             onClick={async () => {
-                               try { await questionsService.update(q.id, { text: q.text }); } catch {}
+                               try {
+                                const refined = await papersService.refineQuestion(q.id, q.text);
+                                const mapped = mapApiQuestionToLocal(refined);
+                                updateQ(s.id, q.id, mapped);
+                                toast.success("Question refined with AI.");
+                               } catch (err) {
+                                const message = err instanceof Error ? err.message : "Refinement failed.";
+                                toast.error("Failed to refine question.", { description: message });
+                                try { await questionsService.update(q.id, { text: q.text }); } catch {}
+                               }
                                setEditingId(null);
                             }}
                             className="h-7 w-7 rounded-md flex items-center justify-center text-teal hover:bg-teal/10 transition"
@@ -1088,16 +1425,21 @@ function Chip({ children, className }: { children: React.ReactNode; className?: 
 function StepExport({
   meta,
   sections,
+  setSections,
+  paperId,
   totalQuestions,
   totalMarks,
 }: {
   meta: any;
   sections: Section[];
+  setSections: (s: Section[]) => void;
+  paperId: string | null;
   totalQuestions: number;
   totalMarks: number;
 }) {
   const [includeAnswers, setIncludeAnswers] = useState(false);
   const [exportError, setExportError] = useState("");
+  const [answerKeyBusy, setAnswerKeyBusy] = useState(false);
 
   const exportMeta: ExportMeta = {
     title: meta.title,
@@ -1118,6 +1460,9 @@ function StepExport({
       marks: question.marks,
       type: question.type,
       topic: question.topic,
+      chartType: question.chartType,
+      chartMode: question.chartMode,
+      chartSpec: question.chartSpec,
       options: question.options,
       answer: question.answer,
     })),
@@ -1135,6 +1480,91 @@ function StepExport({
       fn();
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Export failed.");
+    }
+  };
+
+  const refreshSectionsFromServer = async (): Promise<Section[]> => {
+    if (!paperId) return [];
+    const freshSections = await sectionsService.list(paperId);
+    const mappedFresh: Section[] = freshSections.map((s: any) => ({
+      id: s.id,
+      title: s.title,
+      instructions: s.instructions || "",
+      questions: (s.questions || []).map((q: any) => ({
+        id: q.id,
+        topic: q.topic,
+        type: q.q_type,
+        marks: q.marks,
+        difficulty: q.difficulty,
+        bloom: q.bloom,
+        requiresChart: !!q.requires_chart,
+        chartType: q.requires_chart ? ((q.chart_type || "line") as ChartType) : undefined,
+        chartMode: q.requires_chart ? ((q.chart_mode || "student_plot") as ChartMode) : undefined,
+        chartSpec: parseChartSpec(q.chart_spec) || undefined,
+        text: q.text,
+        options: parseOptions(q.options),
+        answer: q.answer,
+        starred: q.starred,
+      })),
+    }));
+    setSections(mappedFresh);
+    return mappedFresh;
+  };
+
+  const handleGenerateAnswerKey = async () => {
+    setExportError("");
+    if (!paperId) {
+      setExportError("Create and generate the paper first, then generate answer key.");
+      toast.error("Create and generate the paper first.");
+      return;
+    }
+
+    setAnswerKeyBusy(true);
+    try {
+      const result = await papersService.generateAnswerKey(paperId);
+      const latestSections = await refreshSectionsFromServer();
+      const answerKeySections: ExportSection[] = latestSections.map((section) => ({
+        title: section.title,
+        instructions: section.instructions,
+        questions: section.questions.map((question) => ({
+          text: question.text,
+          marks: question.marks,
+          type: question.type,
+          topic: question.topic,
+          chartType: question.chartType,
+          chartMode: question.chartMode,
+          chartSpec: question.chartSpec,
+          options: question.options,
+          answer: question.answer,
+        })),
+      }));
+
+      exportPaperAsPdf(exportMeta, answerKeySections, true);
+      toast.success("Answer key generated.", {
+        description: `${result?.updated ?? 0} answer(s) updated. Download started.`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to generate answer key.";
+      setExportError(message);
+      toast.error("Answer key generation failed.", { description: message });
+    } finally {
+      setAnswerKeyBusy(false);
+    }
+  };
+
+  const handleDownloadAnswerKeyOnly = () => {
+    setExportError("");
+    if (!hasQuestions) {
+      setExportError("Generate at least one question before exporting.");
+      return;
+    }
+    try {
+      exportAnswerKeyOnlyAsTxt(exportMeta, exportSections);
+      toast.success("Answer key downloaded.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to export answer key.";
+      setExportError(message);
+      toast.error("Answer key export failed.", { description: message });
     }
   };
 
@@ -1231,6 +1661,13 @@ function StepExport({
           >
             Download HTML
           </button>
+          <button
+            onClick={handleDownloadAnswerKeyOnly}
+            disabled={!hasQuestions}
+            className="px-4 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            Download Answer Key Only
+          </button>
         </div>
         {exportError && <p className="text-xs text-rose">{exportError}</p>}
       </div>
@@ -1245,8 +1682,13 @@ function StepExport({
             <p className="text-xs text-muted-foreground">AI drafts model answers per question for your review.</p>
           </div>
         </div>
-        <button className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition">
-          Generate Answer Key
+        <button
+          onClick={handleGenerateAnswerKey}
+          disabled={answerKeyBusy || !paperId || !hasQuestions}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
+        >
+          {answerKeyBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {answerKeyBusy ? "Generating..." : "Generate Answer Key"}
         </button>
       </div>
     </div>

@@ -22,6 +22,10 @@ class Question(Base):
     marks: Mapped[int] = mapped_column(Integer, default=5)
     difficulty: Mapped[str] = mapped_column(String(20), default="Medium")   # Easy | Medium | Hard
     bloom: Mapped[str] = mapped_column(String(30), default="Understand")    # BT levels
+    requires_chart: Mapped[bool] = mapped_column(Boolean, default=False)
+    chart_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    chart_mode: Mapped[str | None] = mapped_column(String(30), nullable=True)  # student_plot | analyze_graph
+    chart_spec: Mapped[str | None] = mapped_column(Text, nullable=True)      # JSON-serialised chart metadata/data
     text: Mapped[str] = mapped_column(Text, nullable=False)
     options: Mapped[str | None] = mapped_column(Text, nullable=True)        # JSON-serialised list for MCQ
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)

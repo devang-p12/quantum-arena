@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import appCss from "../styles.css?url";
 import { AppShell } from "@/components/AppShell";
+import { Toaster } from "@/components/ui/sonner";
 import { authService } from "@/lib/authService";
 
 const PUBLIC_PATHS = ["/auth"];
@@ -93,6 +94,7 @@ function RootShell({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
+        <Toaster richColors position="top-right" />
         <Scripts />
       </body>
     </html>

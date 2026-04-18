@@ -19,6 +19,10 @@ export interface Question {
   marks: number;
   difficulty: "Easy" | "Medium" | "Hard";
   bloom: string;
+  requires_chart: boolean;
+  chart_type: "line" | "bar" | "scatter" | "pie" | null;
+  chart_mode: "student_plot" | "analyze_graph" | null;
+  chart_spec: string | null;
   text: string;
   options: string | null;   // JSON string for MCQ
   answer: string | null;
@@ -75,6 +79,7 @@ export const questionsService = {
   async create(sectionId: string, payload: {
     topic: string; q_type?: string; marks?: number;
     difficulty?: string; bloom?: string; text: string;
+    requires_chart?: boolean; chart_type?: string | null; chart_mode?: string | null; chart_spec?: string;
     options?: string; answer?: string; order_index?: number;
   }): Promise<Question> {
     return request<Question>(`/sections/${sectionId}/questions`, {
@@ -86,6 +91,7 @@ export const questionsService = {
   async update(questionId: string, payload: Partial<{
     topic: string; q_type: string; marks: number;
     difficulty: string; bloom: string; text: string;
+    requires_chart: boolean; chart_type: string | null; chart_mode: string | null; chart_spec: string;
     options: string; answer: string; order_index: number;
   }>): Promise<Question> {
     return request<Question>(`/sections/questions/${questionId}`, {

@@ -30,6 +30,10 @@ class QuestionOut(BaseModel):
     marks: int
     difficulty: str
     bloom: str
+    requires_chart: bool
+    chart_type: Optional[str]
+    chart_mode: Optional[str]
+    chart_spec: Optional[str]
     text: str
     options: Optional[str]
     answer: Optional[str]
@@ -60,6 +64,10 @@ class QuestionCreate(BaseModel):
     marks: int = Field(5, ge=0)
     difficulty: str = Field("Medium", pattern="^(Easy|Medium|Hard)$")
     bloom: str = Field("Understand")
+    requires_chart: bool = False
+    chart_type: Optional[str] = Field(None, pattern="^(line|bar|scatter|pie)$")
+    chart_mode: Optional[str] = Field(None, pattern="^(student_plot|analyze_graph)$")
+    chart_spec: Optional[str] = None
     text: str = Field(..., min_length=1)
     options: Optional[str] = None   # JSON string for MCQ options
     answer: Optional[str] = None
@@ -72,6 +80,10 @@ class QuestionUpdate(BaseModel):
     marks: Optional[int] = Field(None, ge=0)
     difficulty: Optional[str] = Field(None, pattern="^(Easy|Medium|Hard)$")
     bloom: Optional[str] = None
+    requires_chart: Optional[bool] = None
+    chart_type: Optional[str] = Field(None, pattern="^(line|bar|scatter|pie)$")
+    chart_mode: Optional[str] = Field(None, pattern="^(student_plot|analyze_graph)$")
+    chart_spec: Optional[str] = None
     text: Optional[str] = Field(None, min_length=1)
     options: Optional[str] = None
     answer: Optional[str] = None

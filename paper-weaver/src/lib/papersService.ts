@@ -76,10 +76,11 @@ export const papersService = {
     return request<void>(`/papers/${id}`, { method: "DELETE" });
   },
 
-  async parsePattern(text?: string, file?: File): Promise<any> {
+  async parsePattern(text?: string, file?: File, examType?: string): Promise<any> {
     const formData = new FormData();
     if (text) formData.append("text", text);
     if (file) formData.append("file", file);
+    if (examType) formData.append("exam_type", examType);
     return request<any>("/papers/parse-pattern", { method: "POST", body: formData });
   },
 
@@ -89,5 +90,16 @@ export const papersService = {
 
   async regenerateQuestion(questionId: string): Promise<any> {
     return request<any>(`/sections/questions/${questionId}/regenerate`, { method: "POST" });
+  },
+
+  async refineQuestion(questionId: string, draftText: string): Promise<any> {
+    return request<any>(`/sections/questions/${questionId}/refine`, {
+      method: "POST",
+      body: JSON.stringify({ draft_text: draftText }),
+    });
+  },
+
+  async generateAnswerKey(paperId: string): Promise<any> {
+    return request<any>(`/papers/${paperId}/generate-answer-key`, { method: "POST" });
   },
 };
