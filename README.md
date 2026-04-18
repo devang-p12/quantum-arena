@@ -50,24 +50,92 @@ This is not just a generator; it is a full authoring workspace with persistent p
 - Questions belong to sections
 - Question bank entries are reused for generation optimization
 
+### Detailed feature breakdown
+
+#### A) Authoring and paper design
+- Guided 5-step creation wizard to reduce manual mistakes during setup.
+- Metadata-driven paper definition (subject, duration, marks, institution, exam type, semester).
+- Section-wise blueprint modeling with editable question slots.
+- Slot attributes include question type, topic, marks, difficulty, Bloom level, and chart requirements.
+
+#### B) AI-assisted content generation
+- Pattern parsing from file/text into structured JSON blueprint.
+- Hybrid generation strategy:
+  - **Question bank reuse first** for consistency and speed.
+  - **LLM fallback** when a good bank match is unavailable.
+- Per-question AI operations:
+  - regenerate (rewrite the full question)
+  - refine (improve user-edited draft while preserving constraints)
+- AI answer-key generation for existing questions.
+
+#### C) Live editing and quality control
+- Inline edit/save workflow directly in the live paper view.
+- Question-level operations: add, delete, star, regenerate, refine.
+- Support for chart-based questions:
+  - student plots from generated data points
+  - student analyzes generated graph
+- Section-level and paper-level structure remains editable before export.
+
+#### D) Export and distribution
+- Export formats: PDF, DOC, HTML, TXT, LaTeX.
+- Optional inclusion of answer keys in exports.
+- Answer-key-only export for quick evaluator distribution.
+- Preview/print support for browser-based review before download.
+
 ---
 
-## 3) Core system workflow
+## 3) Core system workflow (detailed)
 
-1. User logs in/registers.
-2. User starts paper creation.
-3. Pattern input is parsed by LLM into blueprint slots (topic/type/difficulty/bloom/marks/chart requirements).
-4. Metadata and blueprint are saved.
-5. Generation endpoint fills empty slots:
-   - tries question bank match first
-   - falls back to OpenRouter model if no suitable bank match
-   - stores AI outputs back into question bank for future reuse
-6. User edits questions in live view:
-   - star/unstar
-   - delete/add
-   - regenerate one question
-   - refine edited text with AI
-7. User exports paper and optionally answer keys in chosen format.
+### 3.1 End-to-end operational workflow
+1. **Authentication:** User registers/signs in and receives JWT tokens.
+2. **Pattern capture:** User uploads a pattern file or writes a manual pattern description.
+3. **Blueprint parsing:** Backend parses pattern with LLM into a section/question-slot blueprint.
+4. **Paper creation:** Frontend saves paper metadata and creates a persisted paper record.
+5. **Blueprint sync:** Sections and question slots are created in database with ordering and constraints.
+6. **Hybrid generation:** Backend fills slots from bank-first matching, then AI fallback where needed.
+7. **Knowledge retention:** AI-generated items are added to question bank for future reuse.
+8. **Live editing:** User edits, regenerates, refines, stars, and manages each question.
+9. **Answer key generation:** Optional model answers are generated across the paper.
+10. **Export/distribution:** User previews and exports in required format(s).
+
+### 3.2 Detailed generation pipeline
+1. Read all sections/questions for a paper.
+2. Skip questions that already have meaningful text.
+3. For each unfilled question:
+   - attempt bank lookup using topic/type/difficulty/bloom signals
+   - if matched, use bank content and increase usage count
+   - if not matched, call OpenRouter with strict JSON prompt
+4. Persist generated text/options/answers/chart data.
+5. Commit updated paper and return source-wise generation stats.
+
+### 3.3 User flow (what the educator experiences)
+1. **Landing / Login**
+   - Access auth page
+   - Register or sign in
+2. **Dashboard**
+   - View recent papers and quick actions
+   - Open creation flow
+3. **Step 1: Pattern**
+   - Upload pattern OR provide manual instructions OR start from template
+   - Select paper style (Theoretical / MCQ / Viva / Internal Assessment)
+4. **Step 2: Details**
+   - Fill metadata (subject, duration, marks, institution, exam type, etc.)
+5. **Step 3: Blueprint**
+   - Review sections/question slots
+   - Adjust question type, marks, difficulty, Bloom level, chart mode
+6. **Step 4: Live Paper**
+   - Inspect generated questions
+   - Regenerate weak items
+   - Edit and refine wording
+   - Add/remove/star questions
+7. **Step 5: Export**
+   - Download PDF/DOC/HTML/TXT/LaTeX
+   - Include answers or generate dedicated answer key
+
+### 3.4 Common practical user journeys
+- **First-time user journey:** Register → create first paper from manual pattern → generate → refine → export PDF.
+- **Returning faculty journey:** Open dashboard → duplicate structure mentally via blueprint edits → generate quickly using improved bank reuse.
+- **Quality improvement journey:** Identify weak questions in live view → regenerate/refine specific items → regenerate answer key → export final paper pack.
 
 ---
 
