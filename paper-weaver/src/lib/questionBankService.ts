@@ -11,6 +11,7 @@ export interface QuestionBankEntry {
   options?: string;
   answer?: string;
   usage_count: number;
+  is_pyq?: boolean;
 }
 
 export interface QuestionBankListParams {

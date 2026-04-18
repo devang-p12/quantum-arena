@@ -30,6 +30,7 @@ function QuestionBank() {
   const [filterQType, setFilterQType] = useState("");
   const [filterDifficulty, setFilterDifficulty] = useState("");
   const [filterBloom, setFilterBloom] = useState("");
+  const [filterIsPyq, setFilterIsPyq] = useState<"" | "pyq" | "nonpyq">("");
 
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -43,6 +44,7 @@ function QuestionBank() {
   const [marks, setMarks] = useState("1");
   const [text, setText] = useState("");
   const [answer, setAnswer] = useState("");
+  const [isPyqAdd, setIsPyqAdd] = useState(false);
 
   // Bulk Add Form State
   const [bulkJson, setBulkJson] = useState("");
@@ -56,6 +58,7 @@ function QuestionBank() {
         q_type: filterQType || undefined,
         difficulty: filterDifficulty || undefined,
         bloom: filterBloom || undefined,
+        is_pyq: filterIsPyq === "" ? undefined : filterIsPyq === "pyq",
       });
       setQuestions(data);
     } catch {
@@ -65,7 +68,7 @@ function QuestionBank() {
     }
   };
 
-  useEffect(() => { load(); }, [filterQType, filterDifficulty, filterBloom]);
+  useEffect(() => { load(); }, [filterQType, filterDifficulty, filterBloom, filterIsPyq]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,6 +80,7 @@ function QuestionBank() {
     setFilterQType("");
     setFilterDifficulty("");
     setFilterBloom("");
+    setFilterIsPyq("");
     // load is triggered by useEffect on selects, but run explicitly for topic clearing
     setTimeout(load, 0); 
   };
@@ -104,11 +108,13 @@ function QuestionBank() {
         marks: parseInt(marks, 10) || 1,
         text,
         answer,
+        is_pyq: isPyqAdd,
       });
       setQuestions((prev) => [newQuestion, ...prev]);
       setAddOpen(false);
       setText("");
       setAnswer("");
+      setIsPyqAdd(false);
     } catch (err: any) {
       alert(err.message || "Failed to add question");
     } finally {
@@ -199,7 +205,12 @@ function QuestionBank() {
                 <option value="Evaluate">Evaluate</option>
                 <option value="Create">Create</option>
             </select>
-            {(filterTopic || filterQType || filterDifficulty || filterBloom) && (
+            <select value={filterIsPyq} onChange={e => setFilterIsPyq(e.target.value as any)} className="h-10 px-3 rounded-lg border border-border bg-surface text-sm">
+                <option value="">All</option>
+                <option value="pyq">PYQ</option>
+                <option value="nonpyq">Non-PYQ</option>
+            </select>
+            {(filterTopic || filterQType || filterDifficulty || filterBloom || filterIsPyq) && (
                 <button onClick={clearFilters} className="px-3 h-10 rounded-lg text-rose text-sm font-medium hover:bg-rose/10 transition">
                   Clear
                 </button>
@@ -242,6 +253,11 @@ function QuestionBank() {
                     <td className="py-4 px-6 font-medium">
                         <div className="line-clamp-2 max-w-[600px]">{q.text}</div>
                         {q.answer && <div className="text-xs text-muted-foreground mt-1 line-clamp-1">Ans: {q.answer}</div>}
+                        {q.is_pyq && (
+                          <div className="mt-2">
+                            <span className="inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">PYQ</span>
+                          </div>
+                        )}
                     </td>
                     <td className="py-4 px-2 text-muted-foreground text-[11px] uppercase">
                        <span className="block">{q.topic}</span>
@@ -321,6 +337,10 @@ function QuestionBank() {
             <div className="space-y-1">
                <label className="text-sm font-medium">Answer (Optional)</label>
                <textarea value={answer} onChange={e => setAnswer(e.target.value)} rows={2} className="w-full p-3 rounded-lg border border-border bg-surface text-sm" placeholder="Energy cannot be..." />
+            </div>
+            <div className="flex items-center space-x-2">
+               <input type="checkbox" id="isPyq" checked={isPyqAdd} onChange={e => setIsPyqAdd(e.target.checked)} className="h-4 w-4" />
+               <label htmlFor="isPyq" className="text-sm font-medium">Mark as Previous Year Question (PYQ)</label>
             </div>
             <DialogFooter className="pt-4">
               <button disabled={isSubmitting} type="submit" className="px-5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:brightness-110 disabled:opacity-50 inline-flex items-center gap-2">
