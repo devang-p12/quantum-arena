@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from "@tanstack/react-router";
-import { LayoutDashboard, FilePlus2, BarChart3, Bell, GraduationCap, ChevronRight, LogOut } from "lucide-react";
+import { LayoutDashboard, FilePlus2, BarChart3, Bell, GraduationCap, ChevronRight, LogOut, Library } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { authService } from "@/lib/authService";
@@ -7,6 +7,7 @@ import { authService } from "@/lib/authService";
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/create", label: "Paper Creation", icon: FilePlus2 },
+  { to: "/question-bank", label: "Question Bank", icon: Library },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
 

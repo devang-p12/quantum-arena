@@ -39,6 +39,8 @@ class QuestionOut(BaseModel):
     answer: Optional[str]
     starred: bool
     order_index: int
+    difficulty_score: int
+    feedback_count: int
     created_at: datetime
     updated_at: datetime
     model_config = {"from_attributes": True}
@@ -62,7 +64,7 @@ class QuestionCreate(BaseModel):
     topic: str = Field(..., min_length=1, max_length=200)
     q_type: str = Field("Short Answer")
     marks: int = Field(5, ge=0)
-    difficulty: str = Field("Medium", pattern="^(Easy|Medium|Hard)$")
+    difficulty: str = Field("Medium", pattern="^(Easy|Medium|Hard|Very Hard)$")
     bloom: str = Field("Understand")
     requires_chart: bool = False
     chart_type: Optional[str] = Field(None, pattern="^(line|bar|scatter|pie)$")
@@ -78,7 +80,7 @@ class QuestionUpdate(BaseModel):
     topic: Optional[str] = Field(None, min_length=1, max_length=200)
     q_type: Optional[str] = None
     marks: Optional[int] = Field(None, ge=0)
-    difficulty: Optional[str] = Field(None, pattern="^(Easy|Medium|Hard)$")
+    difficulty: Optional[str] = Field(None, pattern="^(Easy|Medium|Hard|Very Hard)$")
     bloom: Optional[str] = None
     requires_chart: Optional[bool] = None
     chart_type: Optional[str] = Field(None, pattern="^(line|bar|scatter|pie)$")
@@ -88,3 +90,7 @@ class QuestionUpdate(BaseModel):
     options: Optional[str] = None
     answer: Optional[str] = None
     order_index: Optional[int] = Field(None, ge=0)
+
+
+class QuestionDifficultyFeedbackIn(BaseModel):
+    feedback: str = Field(..., min_length=1, max_length=20)

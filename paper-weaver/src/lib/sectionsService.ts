@@ -17,7 +17,7 @@ export interface Question {
   topic: string;
   q_type: string;
   marks: number;
-  difficulty: "Easy" | "Medium" | "Hard";
+  difficulty: "Easy" | "Medium" | "Hard" | "Very Hard";
   bloom: string;
   requires_chart: boolean;
   chart_type: "line" | "bar" | "scatter" | "pie" | null;
@@ -28,9 +28,13 @@ export interface Question {
   answer: string | null;
   starred: boolean;
   order_index: number;
+  difficulty_score: number;
+  feedback_count: number;
   created_at: string;
   updated_at: string;
 }
+
+export type DifficultyFeedbackLabel = "Too Easy" | "Easy" | "Just Right" | "Hard" | "Too Hard";
 
 // ── Sections ──────────────────────────────────────────────
 
@@ -106,5 +110,15 @@ export const questionsService = {
 
   async toggleStar(questionId: string): Promise<Question> {
     return request<Question>(`/sections/questions/${questionId}/star`, { method: "PATCH" });
+  },
+
+  async submitDifficultyFeedback(
+    questionId: string,
+    feedback: DifficultyFeedbackLabel,
+  ): Promise<Question> {
+    return request<Question>(`/sections/questions/${questionId}/difficulty-feedback`, {
+      method: "PATCH",
+      body: JSON.stringify({ feedback }),
+    });
   },
 };

@@ -9,9 +9,32 @@ from app.models.paper import Paper
 from app.models.question import Question
 from app.models.section import Section
 from app.models.user import User
-from app.schemas.section import QuestionCreate, QuestionOut, QuestionUpdate
+from app.schemas.section import (
+    QuestionCreate,
+    QuestionDifficultyFeedbackIn,
+    QuestionOut,
+    QuestionUpdate,
+)
 
 router = APIRouter(prefix="/sections", tags=["Questions"])
+
+FEEDBACK_TO_SCORE = {
+    "too easy": 1,
+    "easy": 2,
+    "just right": 3,
+    "hard": 4,
+    "too hard": 5,
+}
+
+
+def _difficulty_label_from_score(score: float) -> str:
+    if score <= 1.5:
+        return "Easy"
+    if score <= 3.5:
+        return "Medium"
+    if score <= 4.5:
+        return "Hard"
+    return "Very Hard"
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -35,6 +58,14 @@ async def _owned_question(question_id: str, user_id: str, db: AsyncSession) -> Q
         .join(Paper, Paper.id == Section.paper_id)
         .where(Question.id == question_id, Paper.user_id == user_id)
     )
+    question = result.scalar_one_or_none()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found.")
+    return question
+
+
+async def _question_by_id(question_id: str, db: AsyncSession) -> Question:
+    result = await db.execute(select(Question).where(Question.id == question_id))
     question = result.scalar_one_or_none()
     if not question:
         raise HTTPException(status_code=404, detail="Question not found.")
@@ -105,6 +136,37 @@ async def toggle_star(
 ):
     question = await _owned_question(question_id, current_user.id, db)
     question.starred = not question.starred
+    await db.commit()
+    await db.refresh(question)
+    return question
+
+
+@router.patch("/questions/{question_id}/difficulty-feedback", response_model=QuestionOut)
+async def submit_difficulty_feedback(
+    question_id: str,
+    body: QuestionDifficultyFeedbackIn,
+    db: AsyncSession = Depends(get_db),
+):
+    question = await _question_by_id(question_id, db)
+
+    feedback_key = body.feedback.strip().lower()
+    score = FEEDBACK_TO_SCORE.get(feedback_key)
+    if score is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid feedback. Use one of: Too Easy, Easy, Just Right, Hard, Too Hard.",
+        )
+
+    old_score = max(1, min(5, int(question.difficulty_score or 3)))
+    old_count = max(0, int(question.feedback_count or 0))
+    averaged_score = ((old_score * old_count) + score) / (old_count + 1)
+    updated_score = int(round(averaged_score))
+    updated_score = max(1, min(5, updated_score))
+
+    question.difficulty_score = updated_score
+    question.feedback_count = old_count + 1
+    question.difficulty = _difficulty_label_from_score(averaged_score)
+
     await db.commit()
     await db.refresh(question)
     return question

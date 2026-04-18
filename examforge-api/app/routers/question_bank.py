@@ -32,7 +32,7 @@ async def list_bank(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    q = select(QuestionBankEntry)
+    q = select(QuestionBankEntry).where(QuestionBankEntry.created_by == current_user.id)
     if topic:
         q = q.where(QuestionBankEntry.topic.ilike(f"%{topic}%"))
     if q_type:
@@ -69,7 +69,7 @@ async def get_bank_entry(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    entry = await _get_entry(entry_id, db)
+    entry = await _get_entry(entry_id, current_user.id, db)
     return entry
 
 
@@ -80,7 +80,7 @@ async def update_bank_entry(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    entry = await _get_entry(entry_id, db)
+    entry = await _get_entry(entry_id, current_user.id, db)
     for k, v in body.model_dump(exclude_unset=True).items():
         setattr(entry, k, v)
     await db.commit()
@@ -94,15 +94,20 @@ async def delete_bank_entry(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    entry = await _get_entry(entry_id, db)
+    entry = await _get_entry(entry_id, current_user.id, db)
     await db.delete(entry)
     await db.commit()
 
 
 # ── Helper ──────────────────────────────────────────────────
 
-async def _get_entry(entry_id: str, db: AsyncSession) -> QuestionBankEntry:
-    res = await db.execute(select(QuestionBankEntry).where(QuestionBankEntry.id == entry_id))
+async def _get_entry(entry_id: str, user_id: str, db: AsyncSession) -> QuestionBankEntry:
+    res = await db.execute(
+        select(QuestionBankEntry).where(
+            QuestionBankEntry.id == entry_id,
+            QuestionBankEntry.created_by == user_id,
+        )
+    )
     entry = res.scalar_one_or_none()
     if not entry:
         raise HTTPException(status_code=404, detail="Question bank entry not found.")

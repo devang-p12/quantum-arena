@@ -34,7 +34,7 @@ export const Route = createFileRoute("/")({
 
 const quickActions = [
   { label: "New Exam Paper", desc: "Start a paper from scratch", icon: Plus, to: "/create" as const },
-  { label: "Browse Question Bank", desc: "Search & filter saved questions", icon: Search, to: "/create" as const },
+  { label: "Browse Question Bank", desc: "Search & filter saved questions", icon: Search, to: "/question-bank" as const },
   { label: "Import Questions", desc: "Bulk import from CSV / JSON", icon: FileUp, to: "/create" as const },
   { label: "View Analytics", desc: "Track quality & usage", icon: TrendingUp, to: "/analytics" as const },
 ];
@@ -71,6 +71,12 @@ function Dashboard() {
   const [previewSections, setPreviewSections] = useState<ExportSection[]>([]);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [busyActionPaperId, setBusyActionPaperId] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<{
+    papers_total: number;
+    question_bank_total: number;
+    active_subjects: number;
+    completed_papers: number;
+  } | null>(null);
 
   const user = typeof window !== "undefined"
     ? JSON.parse(localStorage.getItem("user") ?? "null")
@@ -83,9 +89,25 @@ function Dashboard() {
 
   const load = async () => {
     try {
-      const res = await papersService.list({ page_size: 5 });
-      setPapers(res.items);
-      setTotal(res.total);
+      const [papersResult, metricsResult] = await Promise.allSettled([
+        papersService.list({ page_size: 5 }),
+        papersService.metrics(),
+      ]);
+
+      if (papersResult.status === "fulfilled") {
+        setPapers(papersResult.value.items);
+        setTotal(papersResult.value.total);
+      }
+
+      if (metricsResult.status === "fulfilled") {
+        const m = metricsResult.value;
+        setMetrics({
+          papers_total: m.papers_total,
+          question_bank_total: m.question_bank_total,
+          active_subjects: m.active_subjects,
+          completed_papers: m.completed_papers,
+        });
+      }
     } catch {
       // silently fail — will show empty state
     } finally {
@@ -180,10 +202,10 @@ function Dashboard() {
   const uniqueSubjects = new Set(papers.map((p) => p.subject)).size;
 
   const statCards = [
-    { label: "Papers Generated", value: total !== null ? String(total) : "—", trend: total !== null ? `${total} total` : "Loading...", icon: FileText, tone: "indigo" as const },
-    { label: "Questions in Bank", value: "8,347", trend: "+234 added", icon: Database, tone: "teal" as const },
-    { label: "Avg. Quality Score", value: "94.2%", trend: "Stable", icon: ShieldCheck, tone: "violet" as const },
-    { label: "Active Subjects", value: total !== null ? String(uniqueSubjects) : "—", trend: "from your papers", icon: BookOpen, tone: "amber" as const },
+    { label: "Papers Generated", value: metrics ? String(metrics.papers_total) : (total !== null ? String(total) : "—"), trend: metrics ? `${metrics.completed_papers} completed` : "Loading...", icon: FileText, tone: "indigo" as const },
+    { label: "Questions in Bank", value: metrics ? String(metrics.question_bank_total) : "—", trend: "from completed papers", icon: Database, tone: "teal" as const },
+    { label: "Completed Papers", value: metrics ? String(metrics.completed_papers) : "—", trend: "ready for reuse", icon: ShieldCheck, tone: "violet" as const },
+    { label: "Active Subjects", value: metrics ? String(metrics.active_subjects) : (total !== null ? String(uniqueSubjects) : "—"), trend: "from your papers", icon: BookOpen, tone: "amber" as const },
   ];
 
   return (

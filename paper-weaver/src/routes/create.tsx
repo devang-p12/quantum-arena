@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { papersService } from "@/lib/papersService";
-import { sectionsService, questionsService } from "@/lib/sectionsService";
+import { sectionsService, questionsService, type DifficultyFeedbackLabel } from "@/lib/sectionsService";
 import {
   exportPaperAsDoc,
   exportAnswerKeyOnlyAsTxt,
@@ -33,7 +33,7 @@ export const Route = createFileRoute("/create")({
 
 /* ---------------- Types ---------------- */
 
-type Difficulty = "Easy" | "Medium" | "Hard";
+type Difficulty = "Easy" | "Medium" | "Hard" | "Very Hard";
 type BTLevel = "Remember" | "Understand" | "Apply" | "Analyze" | "Evaluate" | "Create";
 type QType = "MCQ" | "Short Answer" | "Long Answer" | "Numerical" | "True/False" | "Fill in the Blank";
 type ChartType = "line" | "bar" | "scatter" | "pie";
@@ -55,6 +55,8 @@ interface Question {
   options?: string[];
   answer?: string;
   starred?: boolean;
+  difficultyScore?: number;
+  feedbackCount?: number;
 }
 
 interface Section {
@@ -78,8 +80,9 @@ const CHART_MODES: { value: ChartMode; label: string }[] = [
   { value: "student_plot", label: "Student Plots" },
   { value: "analyze_graph", label: "Analyze Generated Graph" },
 ];
-const DIFFS: Difficulty[] = ["Easy", "Medium", "Hard"];
+const DIFFS: Difficulty[] = ["Easy", "Medium", "Hard", "Very Hard"];
 const BLOOMS: BTLevel[] = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"];
+const FEEDBACK_OPTIONS: DifficultyFeedbackLabel[] = ["Too Easy", "Easy", "Just Right", "Hard", "Too Hard"];
 
 const STEPS = [
   { id: 1, label: "Pattern", icon: Upload, desc: "Upload or describe" },
@@ -148,6 +151,7 @@ const diffTone: Record<Difficulty, string> = {
   Easy: "bg-teal/15 text-teal border-teal/30",
   Medium: "bg-amber/15 text-amber border-amber/30",
   Hard: "bg-rose/15 text-rose border-rose/30",
+  "Very Hard": "bg-rose/25 text-rose border-rose/40",
 };
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -189,6 +193,7 @@ const toSafeMarks = (raw: unknown): number => {
 const toSafeDifficulty = (raw: unknown): Difficulty => {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "easy") return "Easy";
+  if (v === "very hard") return "Very Hard";
   if (v === "hard") return "Hard";
   return "Medium";
 };
@@ -339,6 +344,9 @@ function PaperCreation() {
     examType: "Semester End",
     institution: "University of Excellence",
   });
+  const [generationPrefs, setGenerationPrefs] = useState({
+    pyqPercentage: "",
+  });
   const [sections, setSections] = useState<Section[]>([]);
 
   const totalQuestions = useMemo(
@@ -485,7 +493,15 @@ function PaperCreation() {
         setSections(updatedSections);
 
         // 2. Trigger hybrid generation (bank-first, AI fallback)
-        await papersService.generatePaper(paperId);
+        const parsedPyq = generationPrefs.pyqPercentage.trim();
+        await papersService.generatePaper(
+          paperId,
+          parsedPyq === ""
+            ? undefined
+            : {
+                pyq_percentage: Math.max(0, Math.min(100, Number(parsedPyq) || 0)),
+              }
+        );
 
         // 3. Reload sections with AI-written question texts from the DB
         const freshSections = await sectionsService.list(paperId);
@@ -565,7 +581,14 @@ function PaperCreation() {
       <div className="rounded-2xl bg-card border border-border min-h-[520px]">
         {step === 1 && <StepPattern value={pattern} onChange={setPattern} />}
         {step === 2 && <StepMeta value={meta} onChange={setMeta} />}
-        {step === 3 && <StepBlueprint sections={sections} setSections={setSections} />}
+        {step === 3 && (
+          <StepBlueprint
+            sections={sections}
+            setSections={setSections}
+            generationPrefs={generationPrefs}
+            setGenerationPrefs={setGenerationPrefs}
+          />
+        )}
         {step === 4 && <StepLivePaper meta={meta} sections={sections} setSections={setSections} />}
         {step === 5 && (
           <StepExport
@@ -915,8 +938,13 @@ function StepMeta({
    ============================================================ */
 
 function StepBlueprint({
-  sections, setSections,
-}: { sections: Section[]; setSections: (s: Section[]) => void }) {
+  sections, setSections, generationPrefs, setGenerationPrefs,
+}: {
+  sections: Section[];
+  setSections: (s: Section[]) => void;
+  generationPrefs: { pyqPercentage: string };
+  setGenerationPrefs: (v: { pyqPercentage: string }) => void;
+}) {
   const [open, setOpen] = useState<Record<string, boolean>>(
     Object.fromEntries(sections.map((s) => [s.id, true]))
   );
@@ -969,12 +997,26 @@ function StepBlueprint({
             Define sections and the question slots inside each. AI will fill these when you generate.
           </p>
         </div>
-        <button
-          onClick={addSection}
-          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40 hover:text-foreground transition"
-        >
-          <Plus className="h-4 w-4" /> Add Section
-        </button>
+        <div className="flex items-end gap-2 flex-wrap">
+          <label className="text-xs text-muted-foreground">
+            Percentage of PYQs (Previously Asked Questions)
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={generationPrefs.pyqPercentage}
+              onChange={(e) => setGenerationPrefs({ pyqPercentage: e.target.value })}
+              placeholder="Optional (0-100)"
+              className="mt-1 block w-52 rounded-lg bg-surface border border-border px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary"
+            />
+          </label>
+          <button
+            onClick={addSection}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-surface border border-border text-sm font-medium hover:border-primary/40 hover:text-foreground transition"
+          >
+            <Plus className="h-4 w-4" /> Add Section
+          </button>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -1117,13 +1159,14 @@ function StepLivePaper({
 }: { meta: any; sections: Section[]; setSections: (s: Section[]) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [regenId, setRegenId] = useState<string | null>(null);
+  const [sessionFeedback, setSessionFeedback] = useState<Record<string, DifficultyFeedbackLabel>>({});
 
   const mapApiQuestionToLocal = (q: any): Question => ({
     id: q.id,
     topic: q.topic,
     type: q.q_type as QType,
     marks: q.marks,
-    difficulty: q.difficulty as Difficulty,
+    difficulty: toSafeDifficulty(q.difficulty),
     bloom: q.bloom as BTLevel,
     requiresChart: !!q.requires_chart,
     chartType: q.requires_chart ? ((q.chart_type || "line") as ChartType) : undefined,
@@ -1133,6 +1176,8 @@ function StepLivePaper({
     options: parseOptions(q.options),
     answer: q.answer || undefined,
     starred: q.starred,
+    difficultyScore: q.difficulty_score,
+    feedbackCount: q.feedback_count,
   });
 
   const updateQ = (sid: string, qid: string, patch: Partial<Question>) =>
@@ -1171,6 +1216,19 @@ function StepLivePaper({
       toast.error("Failed to regenerate question.", { description: message });
     } finally {
       setRegenId(null);
+    }
+  };
+
+  const submitDifficultyFeedback = async (sid: string, qid: string, feedback: DifficultyFeedbackLabel) => {
+    if (sessionFeedback[qid]) return;
+    try {
+      const updated = await questionsService.submitDifficultyFeedback(qid, feedback);
+      updateQ(sid, qid, mapApiQuestionToLocal(updated));
+      setSessionFeedback((prev) => ({ ...prev, [qid]: feedback }));
+      toast.success("Feedback recorded.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to submit feedback.";
+      toast.error("Unable to save difficulty feedback.", { description: message });
     }
   };
 
@@ -1329,6 +1387,38 @@ function StepLivePaper({
                             </div>
                           )}
                         </div>
+
+                        <aside className="w-32 shrink-0 rounded-lg border border-border bg-surface p-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            Difficulty
+                          </p>
+                          <div className="mt-1.5 space-y-1">
+                            {FEEDBACK_OPTIONS.map((option) => {
+                              const selected = sessionFeedback[q.id] === option;
+                              const locked = Boolean(sessionFeedback[q.id]);
+                              return (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  onClick={() => submitDifficultyFeedback(s.id, q.id, option)}
+                                  disabled={locked || isRegen}
+                                  className={cn(
+                                    "w-full rounded-md border px-2 py-1 text-left text-[10px] font-medium transition",
+                                    selected
+                                      ? "border-primary bg-primary/10 text-primary"
+                                      : "border-border bg-card text-muted-foreground hover:border-primary/30 hover:text-foreground",
+                                    (locked || isRegen) && "cursor-not-allowed opacity-80",
+                                  )}
+                                >
+                                  {option}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <p className="mt-1.5 text-[10px] text-muted-foreground">
+                            Votes: {q.feedbackCount ?? 0}
+                          </p>
+                        </aside>
                       </div>
 
                       {/* hover toolbar */}

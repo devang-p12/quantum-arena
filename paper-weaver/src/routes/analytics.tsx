@@ -4,6 +4,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { TrendingUp, FileText, Users, Award, Clock } from "lucide-react";
+import { useEffect, useState } from "react";
+import { papersService, type MetricsResponse } from "@/lib/papersService";
 
 export const Route = createFileRoute("/analytics")({
   head: () => ({
@@ -15,46 +17,11 @@ export const Route = createFileRoute("/analytics")({
   component: Analytics,
 });
 
-const monthly = [
-  { m: "Nov", papers: 8, questions: 92 },
-  { m: "Dec", papers: 12, questions: 138 },
-  { m: "Jan", papers: 15, questions: 174 },
-  { m: "Feb", papers: 18, questions: 220 },
-  { m: "Mar", papers: 22, questions: 268 },
-  { m: "Apr", papers: 27, questions: 312 },
-];
-
-const bySubject = [
-  { name: "Computer Sci.", papers: 28 },
-  { name: "Mathematics", papers: 24 },
-  { name: "Physics", papers: 19 },
-  { name: "English", papers: 17 },
-  { name: "Geography", papers: 14 },
-  { name: "Economics", papers: 12 },
-  { name: "History", papers: 9 },
-];
-
-const difficulty = [
-  { name: "Easy", value: 38, color: "var(--teal)" },
-  { name: "Medium", value: 44, color: "var(--amber)" },
-  { name: "Hard", value: 18, color: "var(--rose)" },
-];
-
-const bloom = [
-  { level: "Remember", v: 22 },
-  { level: "Understand", v: 28 },
-  { level: "Apply", v: 24 },
-  { level: "Analyze", v: 14 },
-  { level: "Evaluate", v: 8 },
-  { level: "Create", v: 4 },
-];
-
-const kpis = [
-  { label: "Total Papers", value: "142", delta: "+18%", icon: FileText },
-  { label: "Avg. Quality", value: "94.2%", delta: "+1.4%", icon: Award },
-  { label: "Avg. Time Saved", value: "3.6h", delta: "per paper", icon: Clock },
-  { label: "Subjects Covered", value: "18", delta: "+3", icon: Users },
-];
+const difficultyColors: Record<string, string> = {
+  Easy: "var(--teal)",
+  Medium: "var(--amber)",
+  Hard: "var(--rose)",
+};
 
 const tooltipStyle = {
   background: "oklch(1 0 0)",
@@ -66,6 +33,33 @@ const tooltipStyle = {
 };
 
 function Analytics() {
+  const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const m = await papersService.metrics();
+        setMetrics(m);
+      } catch {
+        setMetrics(null);
+      }
+    })();
+  }, []);
+
+  const monthly = metrics?.monthly ?? [];
+  const bySubject = metrics?.by_subject ?? [];
+  const difficulty = (metrics?.difficulty ?? []).map((d) => ({
+    ...d,
+    color: difficultyColors[d.name] || "var(--primary)",
+  }));
+  const bloom = metrics?.bloom ?? [];
+  const kpis = [
+    { label: "Total Papers", value: String(metrics?.papers_total ?? 0), delta: `${metrics?.completed_papers ?? 0} complete`, icon: FileText },
+    { label: "Questions in Bank", value: String(metrics?.question_bank_total ?? 0), delta: "live count", icon: Award },
+    { label: "Total Questions", value: String(metrics?.total_questions ?? 0), delta: "across papers", icon: Clock },
+    { label: "Subjects Covered", value: String(metrics?.active_subjects ?? 0), delta: "live", icon: Users },
+  ];
+
   return (
     <div className="space-y-8 max-w-[1400px] mx-auto">
       <header className="flex items-end justify-between flex-wrap gap-4">

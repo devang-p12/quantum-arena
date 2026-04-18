@@ -29,6 +29,10 @@ class RefineQuestionIn(BaseModel):
     draft_text: str = Field(..., min_length=8)
 
 
+class GeneratePaperIn(BaseModel):
+    pyq_percentage: int | None = Field(None, ge=0, le=100)
+
+
 def _fallback_chart_spec(topic: str, chart_type: str | None, chart_mode: str | None) -> dict:
     resolved_type = chart_type or "line"
     resolved_mode = chart_mode or "student_plot"
@@ -237,11 +241,49 @@ async def _try_bank(
     return random.choice(candidates) if candidates else None
 
 
+async def _try_bank_by_usage_category(
+    db: AsyncSession,
+    user_id: str,
+    topic: str,
+    q_type: str,
+    difficulty: str,
+    pyq_mode: bool,
+    used_ids: set,
+) -> QuestionBankEntry | None:
+    first_token = (topic or "general").split()[0]
+    usage_clause = QuestionBankEntry.usage_count > 0 if pyq_mode else QuestionBankEntry.usage_count == 0
+    q = (
+        select(QuestionBankEntry)
+        .where(
+            QuestionBankEntry.created_by == user_id,
+            QuestionBankEntry.q_type == q_type,
+            QuestionBankEntry.difficulty == difficulty,
+            QuestionBankEntry.topic.ilike(f"%{first_token}%"),
+            usage_clause,
+        )
+        .order_by(QuestionBankEntry.usage_count.asc())
+        .limit(20)
+    )
+    res = await db.execute(q)
+    candidates = [e for e in res.scalars().all() if e.id not in used_ids]
+    return candidates[0] if candidates else None
+
+
+def _is_placeholder_question(question: Question) -> bool:
+    if not question.text:
+        return True
+    text = question.text.strip().lower()
+    if not text:
+        return True
+    return "will be generated" in text or len(text) <= 30
+
+
 # ── Endpoints ─────────────────────────────────────────────────
 
 @router.post("/papers/{paper_id}/generate")
 async def generate_paper(
     paper_id: str,
+    body: GeneratePaperIn | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -264,6 +306,122 @@ async def generate_paper(
     bank_count = 0
     ai_count = 0
     results = []
+
+    # Optional PYQ control mode; default path remains unchanged when unset.
+    pyq_percentage = body.pyq_percentage if body else None
+    if pyq_percentage is not None:
+        pending_questions: list[Question] = []
+        for section in sections:
+            for question in section.questions:
+                if _is_placeholder_question(question):
+                    pending_questions.append(question)
+                else:
+                    results.append({"id": question.id, "source": "existing"})
+
+        total_to_fill = len(pending_questions)
+        pyq_target = int((pyq_percentage / 100) * total_to_fill)
+        selected_bank_entries: list[QuestionBankEntry] = []
+
+        for idx, question in enumerate(pending_questions):
+            use_pyq_pool = idx < pyq_target
+            bank_match = None
+            if not question.requires_chart:
+                bank_match = await _try_bank_by_usage_category(
+                    db=db,
+                    user_id=current_user.id,
+                    topic=question.topic,
+                    q_type=question.q_type,
+                    difficulty=question.difficulty,
+                    pyq_mode=use_pyq_pool,
+                    used_ids=used_bank_ids,
+                )
+
+            if bank_match:
+                question.text = bank_match.text
+                question.options = bank_match.options
+                question.answer = bank_match.answer
+                question.chart_spec = None
+                used_bank_ids.add(bank_match.id)
+                selected_bank_entries.append(bank_match)
+                bank_count += 1
+                results.append(
+                    {
+                        "id": question.id,
+                        "source": "bank_pyq" if use_pyq_pool else "bank_new",
+                        "bank_id": bank_match.id,
+                    }
+                )
+                continue
+
+            try:
+                prompt = build_question_prompt(
+                    topic=question.topic,
+                    q_type=question.q_type,
+                    difficulty=question.difficulty,
+                    bloom=question.bloom,
+                    marks=question.marks,
+                    subject=paper.subject or "General",
+                    requires_chart=question.requires_chart,
+                    chart_type=question.chart_type,
+                    chart_mode=question.chart_mode,
+                )
+                generated = await _call_openrouter(prompt)
+                question.text = generated.get("text", "")
+                opts = generated.get("options")
+                question.options = json.dumps(opts) if opts else None
+                question.answer = generated.get("answer")
+                chart_spec = (
+                    _resolved_chart_spec(
+                        generated,
+                        topic=question.topic,
+                        chart_type=question.chart_type,
+                        chart_mode=question.chart_mode,
+                    )
+                    if question.requires_chart
+                    else None
+                )
+                question.chart_spec = json.dumps(chart_spec) if chart_spec else None
+
+                bank_entry = QuestionBankEntry(
+                    id=str(uuid.uuid4()),
+                    created_by=current_user.id,
+                    topic=question.topic,
+                    q_type=question.q_type,
+                    difficulty=question.difficulty,
+                    bloom=question.bloom,
+                    marks=question.marks,
+                    text=question.text,
+                    options=question.options,
+                    answer=question.answer,
+                    is_ai_generated=True,
+                    usage_count=0,
+                )
+                db.add(bank_entry)
+                selected_bank_entries.append(bank_entry)
+                ai_count += 1
+                results.append(
+                    {
+                        "id": question.id,
+                        "source": "ai_pyq_fallback" if use_pyq_pool else "ai_new_fallback",
+                    }
+                )
+            except Exception as e:
+                results.append({"id": question.id, "source": "error", "detail": str(e)})
+
+        # Increment usage counter for all selected questions (bank or generated).
+        for entry in selected_bank_entries:
+            entry.usage_count = (entry.usage_count or 0) + 1
+
+        await db.commit()
+        return {
+            "paper_id": paper_id,
+            "total": len(results),
+            "from_bank": bank_count,
+            "from_ai": ai_count,
+            "pyq_percentage": pyq_percentage,
+            "pyq_target": pyq_target,
+            "results": results,
+        }
 
     for section in sections:
         for question in section.questions:
