@@ -236,7 +236,7 @@ Supported settings in `app/config.py`:
 ## A) Run backend
 
 ```bash
-cd /home/runner/work/quantum-arena/quantum-arena/examforge-api
+cd examforge-api
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -247,7 +247,7 @@ uvicorn app.main:app --reload --port 8000
 ## B) Run frontend
 
 ```bash
-cd /home/runner/work/quantum-arena/quantum-arena/paper-weaver
+cd paper-weaver
 npm ci
 npm run dev
 ```
@@ -315,4 +315,3 @@ ExamForge in this repository is a **production-style academic authoring pipeline
 - and multi-format publishing.
 
 It is optimized for institutions or educators who need quality exam papers quickly while preserving full editorial control.
-
