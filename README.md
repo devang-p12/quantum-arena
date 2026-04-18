@@ -189,7 +189,7 @@ quantum-arena/
 │   │       ├── __init__.py
 │   │       ├── auth.py
 │   │       ├── paper.py
-│   │       ├── section.py (contains both section and question request/response schemas)
+│   │       ├── section.py
 │   │       └── question_bank.py
 │   └── tests/
 │       └── test_auth.py
@@ -227,6 +227,8 @@ quantum-arena/
     ├── bun.lockb
     └── bunfig.toml
 ```
+
+> Note: question-related API schema models are defined inside `examforge-api/app/schemas/section.py` alongside section schemas.
 
 ---
 
@@ -291,7 +293,7 @@ Supported settings in `app/config.py`:
 - `OPENROUTER_BASE_URL`
 - `OPENROUTER_MODEL`
 
-> Without `OPENROUTER_API_KEY`, AI parsing/generation endpoints cannot produce model output.
+> Without `OPENROUTER_API_KEY`, AI endpoints that parse patterns, generate/regenerate/refine questions, and generate answer keys will return runtime errors (typically HTTP 500 from backend exception handling) instead of model output.
 
 ### Frontend (`paper-weaver/.env`)
 
