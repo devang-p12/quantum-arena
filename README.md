@@ -1,4 +1,4 @@
-# ExamForge README (Quantum Arena Repository)
+# ExamForge README
 
 This repository contains a complete **AI-assisted exam paper generation platform** made of two applications:
 
@@ -294,7 +294,7 @@ Supported settings in `app/config.py`:
 OpenRouter key behavior notes:
 - Configure `OPENROUTER_API_KEY` before using AI features.
 - If the key is missing, AI endpoints fail instead of returning generated content.
-- Current behavior includes errors such as `AI Parsing failed: OPENROUTER_API_KEY is not configured.` and AI routes commonly returning HTTP 500 responses.
+- Current behavior includes errors such as `AI Parsing failed: OPENROUTER_API_KEY is not configured.` and other backend error responses.
 - Recommended future enhancement: return a clearer message like `OpenRouter API key is required. Set OPENROUTER_API_KEY in .env.` with a dedicated status code such as HTTP 503.
 
 ### Frontend (`paper-weaver/.env`)
