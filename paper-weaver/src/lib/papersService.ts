@@ -66,6 +66,13 @@ export interface QuestionBankEntry {
   updated_at: string;
 }
 
+export interface HostTestResponse {
+  paper_id: string;
+  questions_hosted: number;
+  form_url: string;
+  edit_url?: string | null;
+}
+
 export const papersService = {
   async list(params?: {
     page?: number;
@@ -138,6 +145,10 @@ export const papersService = {
 
   async generateAnswerKey(paperId: string): Promise<any> {
     return request<any>(`/papers/${paperId}/generate-answer-key`, { method: "POST" });
+  },
+
+  async hostTest(paperId: string): Promise<HostTestResponse> {
+    return request<HostTestResponse>(`/papers/${paperId}/host-test`, { method: "POST" });
   },
 
   async metrics(): Promise<MetricsResponse> {

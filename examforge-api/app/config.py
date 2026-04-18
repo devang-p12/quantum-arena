@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_MODEL: str = "openai/gpt-4o-mini"
+    APPS_SCRIPT_WEBHOOK_URL: str = ""
+    APPS_SCRIPT_API_KEY: str = ""
+    APPS_SCRIPT_TIMEOUT_SECONDS: int = 45
 
 
 settings = Settings()

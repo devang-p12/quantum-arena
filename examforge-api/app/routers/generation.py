@@ -5,7 +5,9 @@ POST /sections/questions/{qid}/regenerate — rewrite a single question via AI
 """
 import json
 import random
+import re
 import uuid
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -215,6 +217,153 @@ Respond with ONLY valid JSON (no markdown) in this format:
 {{
     "answer": "Concise model answer text"
 }}"""
+
+
+def _parse_mcq_options(raw_options: str | None) -> list[str]:
+    if not raw_options:
+        return []
+    try:
+        parsed = json.loads(raw_options) if isinstance(raw_options, str) else raw_options
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(opt).strip() for opt in parsed if str(opt).strip()]
+
+
+def _resolve_correct_option_index(answer: str | None, options: list[str]) -> int | None:
+    if not answer or not options:
+        return None
+
+    cleaned_answer = answer.strip()
+    if not cleaned_answer:
+        return None
+
+    upper_answer = cleaned_answer.upper()
+    letter_match = re.match(r"^([A-Z])(?:[\)\.\:\-\s].*)?$", upper_answer)
+    if letter_match:
+        idx = ord(letter_match.group(1)) - ord("A")
+        if 0 <= idx < len(options):
+            return idx
+
+    normalized_answer = re.sub(r"\s+", " ", cleaned_answer).strip().lower()
+    for idx, option in enumerate(options):
+        normalized_option = re.sub(r"\s+", " ", option).strip().lower()
+        if normalized_option == normalized_answer:
+            return idx
+
+    return None
+
+
+def _extract_mcq_quiz_items(sections: list[Section]) -> tuple[list[dict], list[str]]:
+    items: list[dict] = []
+    invalid_question_ids: list[str] = []
+
+    for section in sections:
+        ordered_questions = sorted(section.questions, key=lambda q: q.order_index)
+        for question in ordered_questions:
+            if question.q_type != "MCQ":
+                continue
+
+            options = _parse_mcq_options(question.options)
+            correct_index = _resolve_correct_option_index(question.answer, options)
+            if len(options) < 2 or correct_index is None or not question.text.strip():
+                invalid_question_ids.append(question.id)
+                continue
+
+            item_payload = {
+                "title": question.text.strip(),
+                "choices": options,
+                "correctChoiceIndex": correct_index,
+                "points": max(1, int(question.marks or 1)),
+            }
+
+            chart_image_url = _build_chart_image_url(question)
+            if chart_image_url:
+                item_payload["chartImageUrl"] = chart_image_url
+
+            items.append(item_payload)
+
+    return items, invalid_question_ids
+
+
+def _build_chart_image_url(question: Question) -> str | None:
+    if not question.requires_chart or not question.chart_spec:
+        return None
+
+    try:
+        spec = json.loads(question.chart_spec)
+    except json.JSONDecodeError:
+        return None
+
+    points = spec.get("points") if isinstance(spec, dict) else None
+    if not isinstance(points, list) or not points:
+        return None
+
+    chart_type = str(spec.get("chart_type") or question.chart_type or "line").lower()
+    x_label = str(spec.get("x_label") or "X")
+    y_label = str(spec.get("y_label") or "Y")
+    title = str(spec.get("title") or f"{question.topic} Chart")
+
+    labels = [str(p.get("x", "")) for p in points if isinstance(p, dict)]
+    y_values = [float(p.get("y", 0)) for p in points if isinstance(p, dict)]
+
+    if not labels or not y_values:
+        return None
+
+    if chart_type == "pie":
+        config = {
+            "type": "pie",
+            "data": {
+                "labels": labels,
+                "datasets": [{"data": y_values}],
+            },
+            "options": {
+                "plugins": {"title": {"display": True, "text": title}},
+            },
+        }
+    elif chart_type == "scatter":
+        scatter_points = []
+        for p in points:
+            if not isinstance(p, dict):
+                continue
+            try:
+                scatter_points.append({"x": float(p.get("x", 0)), "y": float(p.get("y", 0))})
+            except (TypeError, ValueError):
+                continue
+        if not scatter_points:
+            return None
+        config = {
+            "type": "scatter",
+            "data": {
+                "datasets": [{"label": y_label, "data": scatter_points}],
+            },
+            "options": {
+                "plugins": {"title": {"display": True, "text": title}},
+                "scales": {
+                    "x": {"title": {"display": True, "text": x_label}},
+                    "y": {"title": {"display": True, "text": y_label}},
+                },
+            },
+        }
+    else:
+        normalized_type = "bar" if chart_type == "bar" else "line"
+        config = {
+            "type": normalized_type,
+            "data": {
+                "labels": labels,
+                "datasets": [{"label": y_label, "data": y_values}],
+            },
+            "options": {
+                "plugins": {"title": {"display": True, "text": title}},
+                "scales": {
+                    "x": {"title": {"display": True, "text": x_label}},
+                    "y": {"title": {"display": True, "text": y_label}},
+                },
+            },
+        }
+
+    return f"https://quickchart.io/chart?c={quote(json.dumps(config))}"
 
 
 async def _try_bank(
@@ -694,3 +843,84 @@ async def refine_question(
         return question
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Question refinement failed: {str(e)}")
+
+
+@router.post("/papers/{paper_id}/host-test")
+async def host_test(
+    paper_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not settings.APPS_SCRIPT_WEBHOOK_URL:
+        raise HTTPException(
+            status_code=503,
+            detail="Google Forms host integration is not configured on server.",
+        )
+
+    res = await db.execute(select(Paper).where(Paper.id == paper_id, Paper.user_id == current_user.id))
+    paper = res.scalar_one_or_none()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found.")
+
+    res = await db.execute(
+        select(Section)
+        .options(selectinload(Section.questions))
+        .where(Section.paper_id == paper_id)
+        .order_by(Section.order_index)
+    )
+    sections = res.scalars().all()
+
+    quiz_items, invalid_ids = _extract_mcq_quiz_items(sections)
+    if not quiz_items:
+        raise HTTPException(status_code=400, detail="No valid MCQ questions found to host.")
+    if invalid_ids:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Some MCQs are missing valid options/correct answers and cannot be hosted.",
+                "question_ids": invalid_ids,
+            },
+        )
+
+    payload = {
+        "title": f"{paper.title} - Online Test",
+        "description": f"Auto-hosted quiz for {paper.subject or 'Exam Paper'}",
+        "isQuiz": True,
+        "shuffleQuestions": True,
+        "shuffleOptions": True,
+        "questions": quiz_items,
+    }
+    headers = {"Content-Type": "application/json"}
+    if settings.APPS_SCRIPT_API_KEY:
+        headers["X-API-Key"] = settings.APPS_SCRIPT_API_KEY
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                settings.APPS_SCRIPT_WEBHOOK_URL,
+                json=payload,
+                headers=headers,
+                timeout=float(settings.APPS_SCRIPT_TIMEOUT_SECONDS),
+                follow_redirects=True,
+            )
+        response.raise_for_status()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to create Google Form quiz: {str(e)}")
+
+    data = response.json() if response.content else {}
+    form_url = (
+        data.get("formUrl")
+        or data.get("form_url")
+        or data.get("shareableLink")
+        or data.get("shareable_link")
+        or data.get("url")
+    )
+    if not form_url:
+        raise HTTPException(status_code=502, detail="Apps Script response missing shareable form URL.")
+
+    return {
+        "paper_id": paper_id,
+        "questions_hosted": len(quiz_items),
+        "form_url": form_url,
+        "edit_url": data.get("editUrl") or data.get("edit_url"),
+    }

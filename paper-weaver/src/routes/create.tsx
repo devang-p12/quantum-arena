@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import {
   Upload, FileText, ListChecks, ScrollText, Download, Check, ArrowRight, ArrowLeft,
   Plus, Trash2, RefreshCw, Pencil, GripVertical, Sparkles, X, Save, FileUp,
-  Star, ChevronDown, ChevronUp, Wand2, BookOpen, Clock, Hash, Loader2,
+  Star, ChevronDown, ChevronUp, Wand2, BookOpen, Clock, Hash, Loader2, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { papersService } from "@/lib/papersService";
@@ -1530,6 +1530,9 @@ function StepExport({
   const [includeAnswers, setIncludeAnswers] = useState(false);
   const [exportError, setExportError] = useState("");
   const [answerKeyBusy, setAnswerKeyBusy] = useState(false);
+  const [hostTestBusy, setHostTestBusy] = useState(false);
+  const [hostedTestUrl, setHostedTestUrl] = useState<string | null>(null);
+  const [hostedTestEditUrl, setHostedTestEditUrl] = useState<string | null>(null);
 
   const exportMeta: ExportMeta = {
     title: meta.title,
@@ -1559,6 +1562,9 @@ function StepExport({
   }));
 
   const hasQuestions = totalQuestions > 0;
+  const hasMcqQuestions = sections.some((section) =>
+    section.questions.some((question) => question.type === "MCQ")
+  );
 
   const runExport = (fn: () => void) => {
     setExportError("");
@@ -1655,6 +1661,37 @@ function StepExport({
       const message = err instanceof Error ? err.message : "Failed to export answer key.";
       setExportError(message);
       toast.error("Answer key export failed.", { description: message });
+    }
+  };
+
+  const handleHostTest = async () => {
+    setExportError("");
+    if (!paperId) {
+      setExportError("Create and generate the paper first, then host the test.");
+      return;
+    }
+    if (!hasMcqQuestions) {
+      setExportError("Host Test requires at least one MCQ with options and answer.");
+      return;
+    }
+
+    setHostTestBusy(true);
+    try {
+      const result = await papersService.hostTest(paperId);
+      setHostedTestUrl(result.form_url);
+      setHostedTestEditUrl(result.edit_url || null);
+      if (typeof window !== "undefined") {
+        window.open(result.form_url, "_blank", "noopener,noreferrer");
+      }
+      toast.success("Test hosted successfully.", {
+        description: `${result.questions_hosted} MCQ(s) added to Google Forms quiz.`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to host test.";
+      setExportError(message);
+      toast.error("Host Test failed.", { description: message });
+    } finally {
+      setHostTestBusy(false);
     }
   };
 
@@ -1779,6 +1816,48 @@ function StepExport({
         >
           {answerKeyBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {answerKeyBusy ? "Generating..." : "Generate Answer Key"}
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-5 flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-lg bg-primary/15 text-primary flex items-center justify-center">
+            <ExternalLink className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="font-semibold text-sm">Host Test (Google Forms)</div>
+            <p className="text-xs text-muted-foreground">Creates a quiz with MCQs, correct answers, and shuffling enabled.</p>
+            {hostedTestUrl && (
+              <div className="flex flex-col gap-1">
+                <a
+                  href={hostedTestUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-primary underline"
+                >
+                  Open hosted test link
+                </a>
+                {hostedTestEditUrl && (
+                  <a
+                    href={hostedTestEditUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-primary underline"
+                  >
+                    Open edit form link
+                  </a>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={handleHostTest}
+          disabled={hostTestBusy || !paperId || !hasQuestions || !hasMcqQuestions}
+          className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2"
+        >
+          {hostTestBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          {hostTestBusy ? "Hosting..." : "Host Test"}
         </button>
       </div>
     </div>
