@@ -291,7 +291,7 @@ Supported settings in `app/config.py`:
 - `OPENROUTER_BASE_URL`
 - `OPENROUTER_MODEL`
 
-> Configure `OPENROUTER_API_KEY` before using AI features. If it is missing, endpoints for pattern parsing and AI generation/refinement/answer-key creation fail and return backend errors instead of generated content.
+> Configure `OPENROUTER_API_KEY` before using AI features. If it is missing, endpoints for pattern parsing and AI generation/refinement/answer-key creation fail and typically return `500 Internal Server Error` responses instead of generated content.
 
 ### Frontend (`paper-weaver/.env`)
 
