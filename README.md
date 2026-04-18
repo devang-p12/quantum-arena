@@ -228,8 +228,6 @@ quantum-arena/
     └── bunfig.toml
 ```
 
-> Note: question-related API schema models are defined inside `examforge-api/app/schemas/section.py` alongside section schemas.
-
 ---
 
 ## 5) Backend API overview
@@ -293,7 +291,7 @@ Supported settings in `app/config.py`:
 - `OPENROUTER_BASE_URL`
 - `OPENROUTER_MODEL`
 
-> Without `OPENROUTER_API_KEY`, AI endpoints that parse patterns, generate/regenerate/refine questions, and generate answer keys will return runtime errors (typically HTTP 500 from backend exception handling) instead of model output.
+> Configure `OPENROUTER_API_KEY` before using AI features. If it is missing, endpoints for pattern parsing and AI generation/refinement/answer-key creation fail and return backend errors instead of generated content.
 
 ### Frontend (`paper-weaver/.env`)
 
