@@ -291,7 +291,11 @@ Supported settings in `app/config.py`:
 - `OPENROUTER_BASE_URL`
 - `OPENROUTER_MODEL`
 
-> Configure `OPENROUTER_API_KEY` before using AI features. If it is missing, AI endpoints fail instead of returning generated content. In the current implementation, pattern parsing can return an error detail like `AI Parsing failed: OPENROUTER_API_KEY is not configured.` and other AI routes commonly return HTTP 500 responses; improving these to more descriptive service-availability errors is a recommended enhancement.
+OpenRouter key behavior notes:
+- Configure `OPENROUTER_API_KEY` before using AI features.
+- If the key is missing, AI endpoints fail instead of returning generated content.
+- Current behavior includes errors such as `AI Parsing failed: OPENROUTER_API_KEY is not configured.` and AI routes commonly returning HTTP 500 responses.
+- Recommended future enhancement: return more descriptive service-availability style errors.
 
 ### Frontend (`paper-weaver/.env`)
 
