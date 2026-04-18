@@ -134,7 +134,7 @@ This is not just a generator; it is a full authoring workspace with persistent p
 
 ### 3.4 Common practical user journeys
 - **First-time user journey:** Register → create first paper from manual pattern → generate → refine → export PDF.
-- **Returning faculty journey:** Open dashboard → duplicate structure mentally via blueprint edits → generate quickly using improved bank reuse.
+- **Returning faculty journey:** Open dashboard → create a new paper and adapt the blueprint from previous patterns → generate quickly with stronger bank reuse.
 - **Quality improvement journey:** Identify weak questions in live view → regenerate/refine specific items → regenerate answer key → export final paper pack.
 
 ---
@@ -189,7 +189,7 @@ quantum-arena/
 │   │       ├── __init__.py
 │   │       ├── auth.py
 │   │       ├── paper.py
-│   │       ├── section.py
+│   │       ├── section.py (contains both section and question request/response schemas)
 │   │       └── question_bank.py
 │   └── tests/
 │       └── test_auth.py
